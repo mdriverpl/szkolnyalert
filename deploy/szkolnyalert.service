@@ -1,0 +1,25 @@
+[Unit]
+Description=Szkolny Alert - JSON backend
+After=network.target
+
+[Service]
+Type=simple
+User=szkolnyalert
+Group=szkolnyalert
+WorkingDirectory=/opt/szkolnyalert
+EnvironmentFile=/etc/szkolnyalert.env
+ExecStart=/usr/bin/node server/index.js
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=60
+StateDirectory=szkolnyalert
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/szkolnyalert
+
+[Install]
+WantedBy=multi-user.target

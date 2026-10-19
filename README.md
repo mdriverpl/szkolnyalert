@@ -1,6 +1,12 @@
 # Szkolny Alert
 
-Vue 3 + Vite, backend Express / Node.js, PostgreSQL. Interfejs w języku polskim, responsywny panel z manifestem PWA.
+Vue 3 + Vite, backend Express / Node.js, zapis do pliku JSON lub PostgreSQL. Interfejs w języku polskim, responsywny panel z manifestem PWA.
+
+## Serwer bez bazy danych
+
+Gotowy tryb produkcyjny JSON: `STORAGE_DRIVER=json`, `DEMO_DATA=false`, prywatny `DATA_DIR` i trwały `SMS_ENCRYPTION_KEY`. Nowa instalacja zaczyna od pustego magazynu. Wszystkie szkoły są zapisywane we wspólnym `app.json`, a backend ogranicza dostęp przez `schoolId`. Zapis jest atomowy, z automatycznymi kopiami i blokadą drugiego procesu. Uruchamiaj jedną instancję backendu.
+
+Konfiguracja: [.env.production.example](.env.production.example). Pełna instrukcja wdrożenia, przenoszenia danych i przywracania kopii: [deploy/README.md](deploy/README.md). Dołączone są przykłady systemd i Nginx. PostgreSQL pozostaje opcją po ustawieniu `STORAGE_DRIVER=postgres` oraz `DATABASE_URL`.
 
 ## Uruchomienie
 

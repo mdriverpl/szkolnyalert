@@ -1,0 +1,23 @@
+# Przykład dla domeny z już zainstalowanym certyfikatem HTTPS.
+# Dostosuj server_name i ścieżki certyfikatów do swojego serwera.
+server {
+    listen 80;
+    server_name szkolnyalert.pl;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name szkolnyalert.pl;
+    ssl_certificate /etc/letsencrypt/live/szkolnyalert.pl/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/szkolnyalert.pl/privkey.pem;
+    client_max_body_size 1m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 1800s;
+    }
+}

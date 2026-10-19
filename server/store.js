@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { createJsonStorage } from './json-storage.js';
 import pg from 'pg';
 import { hashPasswordSync } from './auth.js';
 import { addProcedureTemplates } from './procedure-templates.js';
@@ -55,20 +55,28 @@ export function seed() {
   return data;
 }
 
-export async function createStore({ connectionString, file = 'data/demo.json', memory = false } = {}) {
+export async function createStore({ connectionString, file = 'data/demo.json', memory = false, demo = true, backups = !demo, backupIntervalMs, backupLimit, lock = !demo } = {}) {
   let state;
   let pool;
+  let disk;
   if (connectionString) {
     pool = new pg.Pool({ connectionString });
     // Jeden wiersz dokumentu JSONB, blokowany transakcyjnie przy zapisie.
     await pool.query('CREATE TABLE IF NOT EXISTS school_app_state (id integer PRIMARY KEY CHECK (id = 1), data jsonb NOT NULL)');
     await pool.query('INSERT INTO school_app_state (id, data) VALUES (1, $1) ON CONFLICT DO NOTHING', [JSON.stringify({ schools: [], teachers: [], procedures: [], alerts: [], incidents: [], users: [] })]);
   } else {
-    try { state = memory ? seed() : JSON.parse(await readFile(file, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') throw e; state = seed(); }
+    if (!memory) disk = await createJsonStorage(file, { backups, backupIntervalMs, backupLimit, lock });
+    try {
+      const saved = disk ? await disk.read() : null;
+      state = saved !== null ? JSON.parse(saved) : demo ? seed() : { schools: [], teachers: [], procedures: [], alerts: [], incidents: [], users: [], sessions: [] };
+      if (!state || !['schools', 'teachers', 'procedures', 'alerts', 'incidents'].every(name => Array.isArray(state[name]))) throw new Error('Nieprawidłowa struktura danych JSON. Przywróć poprawną kopię zapasową.');
+      if (disk && saved === null) await disk.write(state);
+    } catch (error) { await disk?.close(); throw error; }
   }
   let queue = Promise.resolve();
   const store = {
-    demo: !connectionString,
+    demo: !connectionString && demo,
+    storage: connectionString ? 'postgres' : 'json',
     async read() { return pool ? (await pool.query('SELECT data FROM school_app_state WHERE id = 1')).rows[0].data : structuredClone(state); },
     async mutate(fn) {
       const run = async () => {
@@ -83,24 +91,26 @@ export async function createStore({ connectionString, file = 'data/demo.json', m
           } catch (e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
         }
         const next = structuredClone(state); const result = fn(next);
-        if (!memory) { await mkdir('data', { recursive: true }); await writeFile(file + '.tmp', JSON.stringify(next, null, 2)); await rename(file + '.tmp', file); }
+        if (disk) await disk.write(next, JSON.stringify(state, null, 2));
         state = next; return result;
       };
       const result = queue.then(run); queue = result.catch(() => {}); return result;
     },
-    async close() { await pool?.end(); }
+    async close() { await queue; await disk?.close(); await pool?.end(); }
   };
-  const existing = await store.read();
-  if (!Array.isArray(existing.users) || existing.schools.some(school => !existing.procedureTemplatesApplied?.includes(school.id) || !existing.alertTemplatesApplied?.includes(school.id))) {
-    const demoUsers = !Array.isArray(existing.users) && !connectionString ? seed().users : [];
-    await store.mutate(data => {
-      if (!Array.isArray(data.users)) data.users = demoUsers.filter(user => data.schools.some(school => school.id === user.schoolId));
-      for (const school of data.schools) {
-        addProcedureTemplates(data, school.id);
-        addAlertTemplates(data, school.id);
-      }
-    });
-  }
-  return store;
+  try {
+    const existing = await store.read();
+    if (!Array.isArray(existing.users) || existing.schools.some(school => !existing.procedureTemplatesApplied?.includes(school.id) || !existing.alertTemplatesApplied?.includes(school.id))) {
+      const demoUsers = !Array.isArray(existing.users) && !connectionString && demo ? seed().users : [];
+      await store.mutate(data => {
+        if (!Array.isArray(data.users)) data.users = demoUsers.filter(user => data.schools.some(school => school.id === user.schoolId));
+        for (const school of data.schools) {
+          addProcedureTemplates(data, school.id);
+          addAlertTemplates(data, school.id);
+        }
+      });
+    }
+    return store;
+  } catch (error) { await store.close(); throw error; }
 }
 export const id = () => randomUUID();
