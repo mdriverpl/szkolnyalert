@@ -107,6 +107,20 @@ test('register a school without previous login, create its teacher account, and 
   assert.equal(button('Importuj nauczycieli (1)').disabled, false);
   button('Importuj nauczycieli (1)').click();
   await waitFor(() => !document.querySelector('.modal') && document.querySelector('tbody')?.textContent.includes('Zofia CSV'));
+  button('Wyślij linki do wszystkich').click();
+  await waitFor(() => button('Potwierdzam test API (2)')?.disabled === false);
+  assert.ok(document.querySelector('.modal').textContent.includes('2 odbiorców SMS'));
+  assert.ok(document.querySelector('.modal').textContent.includes('TRYB TESTOWY'));
+  assert.equal(smsCalls, 1, 'opening confirmation does not send SMS');
+  button('Anuluj').click(); await nextTick();
+  assert.equal(smsCalls, 1, 'canceling does not send SMS');
+  button('Wyślij linki do wszystkich').click();
+  await waitFor(() => button('Potwierdzam test API (2)')?.disabled === false);
+  button('Potwierdzam test API (2)').click();
+  await waitFor(() => document.querySelector('.modal')?.textContent.includes('Przyjęto przez SMSAPI: 2 / 2'));
+  assert.equal(smsCalls, 3);
+  assert.equal(button('Potwierdzam test API'), undefined);
+  document.querySelector('.modal [aria-label="Zamknij"]').click(); await nextTick();
   assert.equal((await store.read()).teachers.length, 2);
   button('Użytkownicy').click(); await nextTick(); button('Dodaj użytkownika').click();
   await waitFor(() => document.querySelector('.modal input'));
@@ -126,6 +140,7 @@ test('register a school without previous login, create its teacher account, and 
   assert.equal(document.querySelector('.current-school-name').textContent, 'Pierwsza szkoła');
   button('Nauczyciele').click(); await nextTick(); assert.equal(button('Dodaj nauczyciela'), undefined);
   assert.equal(button('Import CSV'), undefined);
+  assert.equal(button('Wyślij linki do wszystkich'), undefined);
   document.querySelector('[aria-label="Wyloguj"]').click(); await waitFor(() => document.querySelector('.login-page'));
   button('Dodaj szkołę').click(); await waitFor(() => document.querySelector('.registration-form'));
   await fill(['Druga szkoła', 'piotr.admin', 'testowe-haslo-456'], '.registration-form input');

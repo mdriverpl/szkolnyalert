@@ -121,6 +121,12 @@ Sam link jest kluczem dostępu — nie publikuj go w repozytorium ani nie przeka
 
 ### Instalacja i brak połączenia
 
+Administrator może użyć przycisku **Nauczyciele → Wyślij linki do wszystkich**. Okno potwierdzenia pokazuje liczbę odbiorców, tryb SMSAPI, adres aplikacji oraz listę osób pominiętych. Osoby bez poprawnego telefonu lub ze współdzielonym numerem są pomijane, aby nie wysyłać kilku osobistych dostępów na jeden telefon. Lista obejmuje wszystkich nauczycieli tej szkoły, niezależnie od wyszukiwania.
+
+Do rzeczywistej wysyłki ustaw `PUBLIC_APP_URL=https://twoja-domena.pl`, zapisz token SMSAPI i wyłącz tryb testowy w Ustawieniach. Ręczna wysyłka linków działa niezależnie od przełącznika automatycznych SMS-ów przy alertach. Każdy odbiorca dostaje własny nowy link; wcześniejsze dostępy pozostają ważne do unieważnienia. Tryb testowy nie dostarcza SMS-ów i nie zapisuje działających kluczy. SMSAPI może rozliczyć dłuższą wiadomość jako kilka SMS-ów.
+
+Potwierdzenie jest ważne 10 minut. Zmiana listy lub ustawień wymaga ponownego sprawdzenia. Jedno potwierdzenie uruchamia wysyłkę tylko raz, także po ponowieniu żądania. Przy nieznanym wyniku lub przerwaniu połączenia sprawdź SMSAPI przed utworzeniem kolejnej wysyłki. Wynik oznacza przyjęcie przez operatora, nie doręczenie.
+
 Panel nauczyciela ma przycisk **Zainstaluj aplikację**, własny manifest `teacher.webmanifest` i startuje jako osobna PWA pod `/nauczyciel`. Jeżeli przeglądarka nie udostępnia systemowego okna instalacji, wyświetlane są instrukcje dla Androida i iOS. Na telefonie wymagany jest dostępny adres HTTPS; `127.0.0.1` wskazuje samo urządzenie i służy do testów na komputerze.
 
 Build generuje wersjonowany service worker `dist/sw.js` z listą rzeczywistych plików JS/CSS oraz ikon. W trybie developerskim service worker nie jest rejestrowany. Aby sprawdzić pełną wersję PWA, uruchom `npm.cmd run build` i otwórz aplikację udostępnianą przez backend pod http://127.0.0.1:3001/nauczyciel.

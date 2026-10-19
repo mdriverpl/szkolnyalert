@@ -7,6 +7,7 @@ import { addAlertTemplates } from './alert-templates.js';
 import { previewTeacherCsv } from './teacher-csv.js';
 import { createSmsGateway, smsSummary } from './smsapi.js';
 import { createTeacherPanel } from './teacher-panel.js';
+import { createTeacherLinkSms } from './teacher-link-sms.js';
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const required = (value, label, max = 200) => {
@@ -146,6 +147,9 @@ export function createApp(store, options = {}) {
   app.delete('/api/settings/sms', adminOnly, async (req, res) => res.json(await sms.removeToken(req.schoolId)));
   app.post('/api/settings/sms/test', adminOnly, async (req, res) => { rateLimit(req, 'sms-test'); res.json(await sms.test(req.schoolId, req.body.phone)); });
   app.post('/api/schools', adminOnly, (_, res) => res.status(403).json({ error: 'Konto jest przypisane do jednej szkoły. Nową szkołę dodaj na ekranie startowym z osobnym kontem administratora.' }));
+  const teacherLinkSms = createTeacherLinkSms(store, sms);
+  app.post('/api/teachers/link-sms/preview', adminOnly, async (req, res) => res.json(await teacherLinkSms.preview(req.schoolId, req.user.id, `${req.protocol}://${req.get('host')}`)));
+  app.post('/api/teachers/link-sms/send', adminOnly, async (req, res) => res.json(await teacherLinkSms.send(req.schoolId, req.user.id, `${req.protocol}://${req.get('host')}`, req.body)));
   app.post('/api/teachers/:id/panel-key', adminOnly, teacherPanel.generate);
   app.delete('/api/teachers/:id/panel-key', adminOnly, teacherPanel.revoke);
 

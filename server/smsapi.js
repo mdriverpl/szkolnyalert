@@ -126,5 +126,6 @@ export function createSmsGateway(store, { encryptionKey, fetchImpl = (...args) =
       if (incident?.sms?.attemptId === job.attemptId) incident.sms = { ...incident.sms, ...result };
     });
   }
-  return { getSettings, saveSettings, removeToken, test, notifyIncident };
+  const sendLink = (settings, schoolId, number, link) => send(settings, schoolId, [number], `Szkolny Alert: Twoj osobisty panel nauczyciela. Zachowaj link tylko dla siebie: ${link}`);
+  return { getSettings, saveSettings, removeToken, test, notifyIncident, sendLink };
 }

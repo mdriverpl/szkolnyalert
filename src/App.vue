@@ -38,6 +38,22 @@ async function removeSmsToken() {
 const smsStatus = event => ({ disabled: 'SMS: wyłączone', pending: 'SMS: oczekuje na wysyłkę', sending: 'SMS: wysyłka rozpoczęta — sprawdź wynik w SMSAPI', no_recipients: 'SMS: brak numerów odbiorców', test: 'SMS: test API, bez dostarczenia', accepted: `SMS: przyjęto do wysyłki (${event.sms?.accepted || 0})`, partial: `SMS: przyjęto ${event.sms?.accepted || 0} z ${event.sms?.total || 0}`, failed: 'SMS: błąd wysyłki', unknown: 'SMS: wynik nieznany — sprawdź SMSAPI' }[event.sms?.status] || '');
 const dialog = ref(null);
 const teacherLink = ref(''), teacherKey = ref(''), accessCopied = ref(false);
+const linkSmsPreview = ref(null), linkSmsResult = ref(null), linkSmsAttempted = ref(false);
+async function openLinkSms() {
+  linkSmsPreview.value = null; linkSmsResult.value = null; linkSmsAttempted.value = false;
+  open('teachers', null, 'bulk-links'); busy.value = true;
+  try { linkSmsPreview.value = await api('/teachers/link-sms/preview', { method: 'POST' }); }
+  catch (e) { error.value = e.message; } finally { busy.value = false; }
+}
+async function sendTeacherLinks() {
+  if (busy.value || linkSmsAttempted.value || !linkSmsPreview.value?.canSend) return;
+  busy.value = true; error.value = ''; linkSmsAttempted.value = true;
+  try {
+    linkSmsResult.value = await api('/teachers/link-sms/send', { method: 'POST', body: JSON.stringify({ batchId: linkSmsPreview.value.batchId, expectedCount: linkSmsPreview.value.count, confirmed: true }) });
+    await refresh();
+  } catch (e) { error.value = `${e.message} Jeśli wysyłka się rozpoczęła, sprawdź SMSAPI przed ponowieniem.`; }
+  finally { busy.value = false; }
+}
 let previousFocus;
 watch(modal, async value => {
   if (value) {
@@ -159,6 +175,7 @@ async function commitCsvImport() {
 }
 const modalTitle = computed(() => {
   if (!modal.value) return '';
+  if (modal.value.mode === 'bulk-links') return 'Wyślij linki do wszystkich';
   if (modal.value.mode === 'access') return 'Osobisty panel nauczyciela';
   if (modal.value.mode === 'import') return 'Import nauczycieli z CSV';
   if (modal.value.mode === 'launch') return 'Uruchom alert';
@@ -280,7 +297,7 @@ onUnmounted(() => { clearInterval(timer); clearTimeout(toastTimer); });
           </div>
         </section>
         <template v-else>
-          <div class="list-toolbar"><div class="search-field"><Search :size="18"/><input v-model="query" :placeholder="view === 'teachers' ? 'Szukaj nauczyciela…' : 'Szukaj…'" aria-label="Szukaj rekordów"></div><div class="list-toolbar-actions"><span>{{ list.length }} {{ view === 'history' ? 'zdarzeń' : 'rekordów' }}</span><button v-if="view === 'teachers' && canManage" class="btn secondary" @click="openCsvImport"><Upload :size="16"/> Import CSV</button></div></div>
+          <div class="list-toolbar"><div class="search-field"><Search :size="18"/><input v-model="query" :placeholder="view === 'teachers' ? 'Szukaj nauczyciela…' : 'Szukaj…'" aria-label="Szukaj rekordów"></div><div class="list-toolbar-actions"><span>{{ list.length }} {{ view === 'history' ? 'zdarzeń' : 'rekordów' }}</span><button v-if="view === 'teachers' && canManage" class="btn primary" @click="openLinkSms"><MessageSquare :size="16"/> Wyślij linki do wszystkich</button><button v-if="view === 'teachers' && canManage" class="btn secondary" @click="openCsvImport"><Upload :size="16"/> Import CSV</button></div></div>
           <div v-if="!list.length" class="panel empty"><component :is="nav.find(n => n.id === view)?.icon" :size="36"/><h2>{{ query ? 'Brak wyników' : 'Tu zaczyna się dobra organizacja.' }}</h2><p>{{ query ? 'Spróbuj wpisać inne słowo.' : canManage ? 'Dodaj pierwszy rekord, korzystając z przycisku powyżej.' : 'Administrator szkoły nie dodał jeszcze wpisów.' }}</p></div>
           <div v-else-if="view === 'teachers'" class="panel table-wrap"><table><thead><tr><th>Nauczyciel</th><th>Przedmiot / rola</th><th>Kontakt</th><th>Telefon</th><th><span class="sr-only">Działania</span></th></tr></thead><tbody><tr v-for="t in list" :key="t.id"><td><div class="person-cell"><span class="avatar">{{ initials(t.name) }}</span><strong>{{ t.name }}</strong></div></td><td>{{ t.subject }}</td><td><a :href="'mailto:' + t.email">{{ t.email }}</a></td><td><a v-if="t.phone" :href="'tel:' + t.phone.replace(/[^0-9+]/g, '')">{{ t.phone }}</a><span v-else class="muted">—</span></td><td><div v-if="canManage" class="actions"><button class="icon-button teacher-panel-link" :aria-label="'Panel nauczyciela: ' + t.name" :title="t.hasPanelKey ? 'Zarządzaj osobistym linkiem' : 'Utwórz osobisty link'" @click="open('teachers', t, 'access')"><Link :size="17"/></button><button class="icon-button" :aria-label="'Edytuj: ' + t.name" @click="open('teachers', t)"><Pencil :size="16"/></button><button class="icon-button" :aria-label="'Usuń: ' + t.name" @click="open('teachers', t, 'delete')"><Trash2 :size="16"/></button></div></td></tr></tbody></table></div>
           <div v-else-if="view === 'users'" class="panel table-wrap"><table><thead><tr><th>Użytkownik</th><th>Login</th><th>Telefon</th><th>Rola</th><th>Działania</th></tr></thead><tbody><tr v-for="u in list" :key="u.id"><td><div class="person-cell"><span class="avatar">{{ initials(u.name) }}</span><strong>{{ u.name }}</strong></div></td><td>{{ u.username }}</td><td><a v-if="u.phone" :href="'tel:' + u.phone.replace(/[^0-9+]/g, '')">{{ u.phone }}</a><span v-else class="muted">—</span></td><td><span class="badge neutral">{{ u.role === 'admin' ? 'Administrator' : 'Nauczyciel' }}</span></td><td><div class="actions"><button class="icon-button" :aria-label="'Edytuj: ' + u.name" @click="open('users', u)"><Pencil :size="16"/></button><button class="icon-button" :aria-label="'Usuń: ' + u.name" @click="open('users', u, 'delete')"><Trash2 :size="16"/></button></div></td></tr></tbody></table></div>
@@ -291,7 +308,25 @@ onUnmounted(() => { clearInterval(timer); clearTimeout(toastTimer); });
       </main>
     </div>
     <div v-if="modal" class="modal-backdrop" @click.self="close" @keydown.esc="close"><section ref="dialog" :class="['modal', { 'csv-modal': modal.mode === 'import' }]" @keydown="dialogKeys" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header><div><span class="eyebrow">SZKOLNY ALERT</span><h2 id="modal-title">{{ modalTitle }}</h2></div><button class="icon-button" aria-label="Zamknij" :disabled="busy" @click="close"><X :size="22"/></button></header>
-      <template v-if="modal.mode === 'import'">
+      <template v-if="modal.mode === 'bulk-links'">
+        <div class="teacher-access-admin">
+          <p class="modal-description">Osobiste linki do panelu otrzymają nauczyciele szkoły <strong>{{ school?.name }}</strong>. Wysyłka obejmuje całą szkołę, niezależnie od wyszukiwania.</p>
+          <p v-if="busy" role="status"><LoaderCircle class="spin" :size="17"/> {{ linkSmsAttempted ? 'Wysyłanie wiadomości…' : 'Sprawdzanie odbiorców…' }}</p>
+          <template v-if="linkSmsPreview">
+            <div class="csv-summary"><span><strong>{{ linkSmsPreview.count }}</strong> odbiorców SMS</span><span><strong>{{ linkSmsPreview.skipped.length }}</strong> pominiętych</span></div>
+            <p class="modal-description"><strong>{{ linkSmsPreview.testMode ? 'TRYB TESTOWY — SMS-y nie zostaną dostarczone.' : 'Potwierdzasz płatną wysyłkę SMS z osobistym linkiem do ' + linkSmsPreview.count + ' osób?' }}</strong></p>
+            <p class="form-hint">Każda osoba otrzyma własny link. Dotychczasowe linki nadal działają; można je unieważnić w panelu danego nauczyciela. Operator może rozliczyć dłuższą wiadomość jako kilka SMS-ów.</p>
+            <p class="form-hint">Adres aplikacji: {{ linkSmsPreview.baseUrl || 'nieskonfigurowany' }}</p>
+            <p v-for="issue in linkSmsPreview.issues" :key="issue" class="error">{{ issue }}</p>
+            <details v-if="linkSmsPreview.recipients.length"><summary>Odbiorcy ({{ linkSmsPreview.count }})</summary><p v-for="person in linkSmsPreview.recipients" :key="person.id" class="form-hint">{{ person.name }} · +{{ person.phone }}</p></details>
+            <details v-if="linkSmsPreview.skipped.length"><summary>Pominięte osoby ({{ linkSmsPreview.skipped.length }})</summary><p v-for="person in linkSmsPreview.skipped" :key="person.id" class="form-hint">{{ person.name }} — {{ person.reason }}</p></details>
+          </template>
+          <div v-if="linkSmsResult" role="status"><p>{{ linkSmsResult.message }}</p><p v-if="linkSmsResult.total">Przyjęto przez SMSAPI: <strong>{{ linkSmsResult.accepted }} / {{ linkSmsResult.total }}</strong>. Błędy: {{ linkSmsResult.failed }}. Nieznany wynik: {{ linkSmsResult.unknown }}.</p></div>
+          <p v-if="error" class="error" role="alert">{{ error }}</p>
+          <div class="modal-footer"><button class="btn secondary" :disabled="busy" @click="close">{{ linkSmsAttempted ? 'Zamknij' : 'Anuluj' }}</button><button v-if="!linkSmsAttempted" class="btn primary" :disabled="busy || !linkSmsPreview?.canSend" @click="sendTeacherLinks"><MessageSquare :size="16"/> {{ linkSmsPreview?.testMode ? 'Potwierdzam test API' : 'Potwierdzam wysyłkę SMS' }} ({{ linkSmsPreview?.count || 0 }})</button></div>
+        </div>
+      </template>
+      <template v-else-if="modal.mode === 'import'">
         <div class="csv-import-body">
           <p class="modal-description">Wybierz plik CSV z nauczycielami. Import dotyczy wyłącznie szkoły <strong>{{ school?.name }}</strong>. Sprawdź podgląd przed zapisem.</p>
           <div class="csv-file-tools"><label>Plik CSV<input type="file" accept=".csv,text/csv" :disabled="busy" @change="previewCsvFile"></label><label>Kodowanie<select v-model="csvImport.encoding" :disabled="busy" @change="previewCsvFile"><option value="utf-8">UTF-8</option><option value="windows-1250">Windows-1250</option></select></label><a class="text-link" href="/api/teachers/import/template" download="nauczyciele-wzor.csv"><Download :size="16"/> Pobierz wzór CSV</a></div>
