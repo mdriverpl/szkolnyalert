@@ -10,7 +10,23 @@ const ownTeacher = (data, teacherId, schoolId) => {
   return teacher;
 };
 
-export function createTeacherPanel(store, { secure, rateLimit, launchIncident }) {
+export function createTeacherPanel(store, { secure, rateLimit, launchIncident, vault }) {
+  async function prepareKey(schoolId) {
+    const key = randomBytes(32).toString('hex');
+    return { keyHash: hash(key), encryptedKey: await vault.sealAccessKey(key, `teacher-panel:${schoolId}`), createdAt: new Date().toISOString() };
+  }
+  function attachKey(data, teacher, access) {
+    data.teacherKeys ??= [];
+    data.teacherKeys.push({ ...access, teacherId: teacher.id, schoolId: teacher.schoolId });
+  }
+  async function retrieve(req, res) {
+    const data = await store.read();
+    ownTeacher(data, req.params.id, req.schoolId);
+    const access = data.teacherKeys?.find(x => x.teacherId === req.params.id && x.schoolId === req.schoolId && x.encryptedKey);
+    if (!access) return res.json({ key: null, path: null });
+    const key = await vault.openAccessKey(access.encryptedKey, `teacher-panel:${req.schoolId}`);
+    res.json({ key, path: `/nauczyciel#klucz=${key}` });
+  }
   const router = Router();
   const cookieOptions = { httpOnly: true, secure, sameSite: 'strict', path: '/api/teacher-panel', maxAge: 30 * 86400_000 };
   router.post('/access', async (req, res) => {
@@ -56,11 +72,12 @@ export function createTeacherPanel(store, { secure, rateLimit, launchIncident })
   router.use((req, res) => res.status(404).json({ error: 'Nie znaleziono funkcji panelu nauczyciela.' }));
 
   async function generate(req, res) {
-    const key = randomBytes(32).toString('hex');
+    const access = await prepareKey(req.schoolId);
+    const key = await vault.openAccessKey(access.encryptedKey, `teacher-panel:${req.schoolId}`);
     await store.mutate(data => {
       ownTeacher(data, req.params.id, req.schoolId);
       data.teacherKeys = (data.teacherKeys || []).filter(x => x.teacherId !== req.params.id);
-      data.teacherKeys.push({ teacherId: req.params.id, schoolId: req.schoolId, keyHash: hash(key), createdAt: new Date().toISOString() });
+      attachKey(data, { id: req.params.id, schoolId: req.schoolId }, access);
       data.teacherSessions = (data.teacherSessions || []).filter(x => x.teacherId !== req.params.id);
     });
     res.json({ key, path: `/nauczyciel#klucz=${key}` });
@@ -73,5 +90,5 @@ export function createTeacherPanel(store, { secure, rateLimit, launchIncident })
     });
     res.json({ ok: true });
   }
-  return { router, generate, revoke };
+  return { router, generate, revoke, prepareKey, attachKey, retrieve };
 }

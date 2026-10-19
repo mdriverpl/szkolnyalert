@@ -20,6 +20,46 @@ async function fixture(t) {
 }
 const login = (request, login = 'admin@szkolnyalert.pl') => request('/login', 'POST', { login, password: 'demo12345' });
 
+test('creation and CSV import issue recoverable encrypted personal keys atomically without rotating on edits or duplicates', async t => {
+  const { store, client, restart } = await fixture(t);
+  const admin = client(), other = client(), teacher = client(), panel = client();
+  await login(admin); await login(other, 'admin2@szkolnyalert.pl'); await login(teacher, 'nauczyciel@szkolnyalert.pl');
+  const created = await admin('/teachers', 'POST', { name: 'Nowa Osoba', email: 'nowa@example.com', subject: 'Historia' });
+  assert.equal(created.status, 201);
+  const path = `/teachers/${created.body.id}/panel-key`;
+  const access = (await admin(path)).body;
+  assert.match(access.key, /^[a-f0-9]{64}$/);
+  assert.equal((await panel('/teacher-panel/access', 'POST', { key: access.key })).status, 200);
+  assert.equal((await other(path)).status, 404);
+  assert.equal((await teacher(path)).status, 403);
+  await admin(`/teachers/${created.body.id}`, 'PUT', { ...created.body, subject: 'Matematyka' });
+  await restart();
+  assert.equal((await admin(path)).body.key, access.key);
+  assert.equal((await panel('/teacher-panel/state')).status, 200);
+  const csv = 'name,email,subject\nCSV Osoba,csv.auto@example.com,Historia\nNowa Osoba,nowa@example.com,Historia';
+  const before = (await store.read()).teacherKeys.length;
+  await admin('/teachers/import/preview', 'POST', { csv });
+  assert.equal((await store.read()).teacherKeys.length, before, 'preview creates no access keys');
+  const result = await admin('/teachers/import', 'POST', { csv });
+  assert.equal(result.status, 200); assert.equal(result.body.imported, 1);
+  const data = await store.read(), imported = data.teachers.find(x => x.email === 'csv.auto@example.com');
+  const importedAccess = (await admin(`/teachers/${imported.id}/panel-key`)).body;
+  assert.notEqual(importedAccess.key, access.key);
+  assert.equal((await panel('/teacher-panel/access', 'POST', { key: importedAccess.key })).status, 200);
+  assert.equal(JSON.stringify(data).includes(importedAccess.key), false);
+  assert.equal(JSON.stringify((await teacher('/state')).body).includes('encryptedKey'), false);
+  await admin('/teachers/import', 'POST', { csv });
+  assert.equal((await store.read()).teacherKeys.length, before + 1);
+  assert.equal((await admin(path)).body.key, access.key, 'duplicates do not rotate existing access');
+  const bad = await admin('/teachers/import', 'POST', { csv: 'name,email,subject\nBad,not-an-email,Historia\nValid,valid.auto@example.com,Historia' });
+  assert.equal(bad.status, 422); assert.equal((await store.read()).teacherKeys.length, before + 1);
+  await admin(path, 'DELETE');
+  assert.equal((await admin(path)).body.key, null);
+  const rotated = (await admin(path, 'POST')).body;
+  assert.notEqual(rotated.key, access.key);
+  assert.equal((await admin(path)).body.key, rotated.key);
+});
+
 test('personal teacher keys grant only the teacher panel of one school, never administration', async t => {
   const { store, client, restart } = await fixture(t);
   const admin = client(), other = client(), regularTeacher = client(), panel = client();

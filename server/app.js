@@ -115,7 +115,7 @@ export function createApp(store, options = {}) {
     if (!user || !valid || !data.schools.some(x => x.id === user.schoolId)) throw fail('Niepoprawna nazwa użytkownika lub hasło.', 401);
     await issueSession(req, res, user); res.json({ user: publicUser(user), demo: store.demo });
   });
-  const teacherPanel = createTeacherPanel(store, { secure, rateLimit, launchIncident });
+  const teacherPanel = createTeacherPanel(store, { secure, rateLimit, launchIncident, vault: sms });
   app.use('/api/teacher-panel', teacherPanel.router);
   app.use('/api', async (req, res, next) => {
     const token = readToken(req);
@@ -151,6 +151,7 @@ export function createApp(store, options = {}) {
   app.post('/api/teachers/link-sms/preview', adminOnly, async (req, res) => res.json(await teacherLinkSms.preview(req.schoolId, req.user.id, `${req.protocol}://${req.get('host')}`)));
   app.post('/api/teachers/link-sms/send', adminOnly, async (req, res) => res.json(await teacherLinkSms.send(req.schoolId, req.user.id, `${req.protocol}://${req.get('host')}`, req.body)));
   app.post('/api/teachers/:id/panel-key', adminOnly, teacherPanel.generate);
+  app.get('/api/teachers/:id/panel-key', adminOnly, teacherPanel.retrieve);
   app.delete('/api/teachers/:id/panel-key', adminOnly, teacherPanel.revoke);
 
   app.get('/api/teachers/import/template', adminOnly, (_, res) => {
@@ -162,10 +163,20 @@ export function createApp(store, options = {}) {
     res.json(previewTeacherCsv(req.body.csv, data.teachers.filter(x => x.schoolId === req.schoolId), teacherData));
   });
   app.post('/api/teachers/import', adminOnly, async (req, res) => {
+    const initial = await store.read();
+    const initialPreview = previewTeacherCsv(req.body.csv, initial.teachers.filter(x => x.schoolId === req.schoolId), teacherData);
+    if (initialPreview.invalid) throw Object.assign(fail('Popraw błędne wiersze. Nie zapisano żadnych nauczycieli.', 422), { preview: initialPreview });
+    const accesses = new Map();
+    for (const row of initialPreview.rows) if (row.status === 'ready') accesses.set(row.teacher.email, await teacherPanel.prepareKey(req.schoolId));
     const result = await store.mutate(data => {
       const preview = previewTeacherCsv(req.body.csv, data.teachers.filter(x => x.schoolId === req.schoolId), teacherData);
       if (preview.invalid) throw Object.assign(fail('Popraw błędne wiersze i ponownie wybierz plik. Nie zapisano żadnych nauczycieli.', 422), { preview });
-      for (const row of preview.rows) if (row.status === 'ready') data.teachers.push({ ...row.teacher, id: id(), schoolId: req.schoolId });
+      for (const row of preview.rows) if (row.status === 'ready') {
+        const access = accesses.get(row.teacher.email);
+        if (!access) throw fail('Lista nauczycieli zmieniła się. Ponów import.', 409);
+        const teacher = { ...row.teacher, id: id(), schoolId: req.schoolId };
+        data.teachers.push(teacher); teacherPanel.attachKey(data, teacher, access);
+      }
       return { imported: preview.ready, skipped: preview.skipped, total: preview.total };
     });
     res.json(result);
@@ -176,6 +187,7 @@ export function createApp(store, options = {}) {
       const body = req.body;
       let passwordHash;
       if (collection === 'users' && (!req.params.id || body.password)) passwordHash = await hashPassword(validatePassword(body.password));
+      const access = collection === 'teachers' && !req.params.id ? await teacherPanel.prepareKey(req.schoolId) : null;
       const result = await store.mutate(data => {
         const existing = req.params.id ? ownRecord(data, collection, req.params.id, req.schoolId) : null;
         if (body.schoolId !== undefined && body.schoolId !== req.schoolId) throw fail('Nie możesz przypisać danych do innej szkoły.', 403);
@@ -209,6 +221,7 @@ export function createApp(store, options = {}) {
           }
         }
         if (existing) data[collection][data[collection].indexOf(existing)] = record; else data[collection].push(record);
+        if (access) teacherPanel.attachKey(data, record, access);
         return collection === 'users' ? publicUser(record) : record;
       }); res.status(req.params.id ? 200 : 201).json(result);
     };
