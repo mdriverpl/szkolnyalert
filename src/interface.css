@@ -1,4 +1,11 @@
 /* A calm workspace; a deliberately unmistakable red for serious alerts. */
+.teacher-panel-link { color: #537aab; background: #f0f5fc; margin-right: 5px; }
+.teacher-access-admin { padding: 24px 28px 0; }
+.teacher-access-admin > .modal-description { margin-bottom: 18px; }
+.teacher-link-value { font-family: ui-monospace,monospace; font-size: 11px; color: #547196; line-height: 1.8; }
+.teacher-access-note { margin-top: 18px; }
+.teacher-access-rotation { background: #fff7e8; color: #9a7435; border: 1px solid #f0dfbd; border-radius: 7px; padding: 13px; margin-bottom: 18px; font-size: 11px; line-height: 1.8; }
+.teacher-access-admin .modal-footer { justify-content: space-between; }
 .sms-settings-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 22px; align-items: start; }
 .sms-settings-form { padding: 0 25px 25px; }
 .sms-settings-panel .eyebrow { margin-bottom: 9px; }

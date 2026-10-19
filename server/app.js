@@ -6,6 +6,7 @@ import { addProcedureTemplates } from './procedure-templates.js';
 import { addAlertTemplates } from './alert-templates.js';
 import { previewTeacherCsv } from './teacher-csv.js';
 import { createSmsGateway, smsSummary } from './smsapi.js';
+import { createTeacherPanel } from './teacher-panel.js';
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const required = (value, label, max = 200) => {
@@ -70,14 +71,16 @@ export function createApp(store, options = {}) {
     });
     res.cookie('session', token, sessionCookie);
   }
-  function rateLimit(req, kind) {
+  function rateLimit(req, kind, limit = 15) {
     const now = Date.now(), key = `${kind}:${req.ip}`;
     for (const [key, value] of attempts) if (value.until < now) attempts.delete(key);
     const value = attempts.get(key) || { count: 0, until: now + 15 * 60_000 };
-    if (value.count >= 15) throw fail('Zbyt wiele prób. Spróbuj ponownie za 15 minut.', 429);
+    if (value.count >= limit) throw fail('Zbyt wiele prób. Spróbuj ponownie za 15 minut.', 429);
     value.count++; attempts.set(key, value);
   }
   app.disable('x-powered-by');
+  // The API listens on loopback; HTTPS reverse proxies must preserve Host.
+  app.set('trust proxy', 'loopback');
   app.use('/api/teachers/import', express.json({ limit: '1mb' }));
   app.use(express.json({ limit: '64kb' }));
   app.use((req, res, next) => {
@@ -111,6 +114,8 @@ export function createApp(store, options = {}) {
     if (!user || !valid || !data.schools.some(x => x.id === user.schoolId)) throw fail('Niepoprawna nazwa użytkownika lub hasło.', 401);
     await issueSession(req, res, user); res.json({ user: publicUser(user), demo: store.demo });
   });
+  const teacherPanel = createTeacherPanel(store, { secure, rateLimit, launchIncident });
+  app.use('/api/teacher-panel', teacherPanel.router);
   app.use('/api', async (req, res, next) => {
     const token = readToken(req);
     const reject = () => res.status(401).json({ error: 'Zaloguj się do swojej szkoły, aby kontynuować.' });
@@ -131,6 +136,7 @@ export function createApp(store, options = {}) {
     const data = await store.read();
     const result = { schools: data.schools.filter(x => x.id === req.schoolId) };
     for (const type of ['teachers', 'procedures', 'alerts', 'incidents']) result[type] = data[type].filter(x => x.schoolId === req.schoolId);
+    if (req.user.role === 'admin') result.teachers = result.teachers.map(teacher => ({ ...teacher, hasPanelKey: !!data.teacherKeys?.some(x => x.teacherId === teacher.id && x.schoolId === req.schoolId) }));
     result.users = req.user.role === 'admin' ? data.users.filter(x => x.schoolId === req.schoolId).map(publicUser) : [];
     const gateway = smsSummary(data.smsSettings?.find(x => x.schoolId === req.schoolId));
     res.json({ ...result, user: req.user, demo: store.demo, loginRequired: true, smsGateway: { enabled: gateway.enabled && gateway.hasToken, testMode: gateway.testMode } });
@@ -140,6 +146,8 @@ export function createApp(store, options = {}) {
   app.delete('/api/settings/sms', adminOnly, async (req, res) => res.json(await sms.removeToken(req.schoolId)));
   app.post('/api/settings/sms/test', adminOnly, async (req, res) => { rateLimit(req, 'sms-test'); res.json(await sms.test(req.schoolId, req.body.phone)); });
   app.post('/api/schools', adminOnly, (_, res) => res.status(403).json({ error: 'Konto jest przypisane do jednej szkoły. Nową szkołę dodaj na ekranie startowym z osobnym kontem administratora.' }));
+  app.post('/api/teachers/:id/panel-key', adminOnly, teacherPanel.generate);
+  app.delete('/api/teachers/:id/panel-key', adminOnly, teacherPanel.revoke);
 
   app.get('/api/teachers/import/template', adminOnly, (_, res) => {
     res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="nauczyciele-wzor.csv"' });
@@ -209,22 +217,30 @@ export function createApp(store, options = {}) {
         if (collection === 'procedures' && data.alerts.some(x => x.schoolId === req.schoolId && x.procedureId === record.id)) throw fail('Procedura jest używana przez alert.');
         if (collection === 'users' && record.role === 'admin' && !data.users.some(x => x.schoolId === req.schoolId && x.id !== record.id && x.role === 'admin')) throw fail('Nie można usunąć ostatniego administratora szkoły.');
         data[collection] = data[collection].filter(x => x.id !== record.id);
+        if (collection === 'teachers') {
+          data.teacherKeys = (data.teacherKeys || []).filter(x => x.teacherId !== record.id);
+          data.teacherSessions = (data.teacherSessions || []).filter(x => x.teacherId !== record.id);
+        }
       }); res.json({ ok: true });
     });
   }
-  app.post('/api/incidents', async (req, res) => {
+  async function launchIncident(schoolId, actor, body, waitForSms = true) {
     const result = await store.mutate(data => {
-      const alert = ownRecord(data, 'alerts', req.body.alertId, req.schoolId);
-      if (data.incidents.some(x => x.schoolId === req.schoolId && x.alertId === alert.id && x.status === 'active')) throw fail('Ten alert jest już aktywny.');
-      const procedure = ownRecord(data, 'procedures', alert.procedureId, req.schoolId);
-      const incident = { id: id(), alertId: alert.id, schoolId: req.schoolId, name: alert.name, severity: alert.severity, location: required(req.body.location, 'miejsce zdarzenia'), procedure: structuredClone(procedure), status: 'active', createdAt: new Date().toISOString(), createdBy: req.user.username };
-      const gateway = data.smsSettings?.find(x => x.schoolId === req.schoolId);
+      const alert = ownRecord(data, 'alerts', body.alertId, schoolId);
+      if (data.incidents.some(x => x.schoolId === schoolId && x.alertId === alert.id && x.status === 'active')) throw fail('Ten alert jest już aktywny.');
+      const procedure = ownRecord(data, 'procedures', alert.procedureId, schoolId);
+      const incident = { id: id(), alertId: alert.id, schoolId, name: alert.name, severity: alert.severity, location: required(body.location, 'miejsce zdarzenia'), procedure: structuredClone(procedure), status: 'active', createdAt: new Date().toISOString(), createdBy: actor.username, ...(actor.teacherId ? { createdByTeacherId: actor.teacherId } : {}) };
+      const gateway = data.smsSettings?.find(x => x.schoolId === schoolId);
       incident.sms = { status: gateway?.enabled && gateway.encryptedToken ? 'pending' : 'disabled' };
       data.incidents.unshift(incident); return incident;
     });
-    await sms.notifyIncident(req.schoolId, result.id);
-    const saved = (await store.read()).incidents.find(x => x.id === result.id && x.schoolId === req.schoolId);
-    res.status(201).json(saved);
+    const notification = sms.notifyIncident(schoolId, result.id);
+    if (waitForSms) await notification;
+    else notification.catch(() => console.error('Nie udało się zapisać wyniku wysyłki SMS. Sprawdź historię zdarzenia.'));
+    return (await store.read()).incidents.find(x => x.id === result.id && x.schoolId === schoolId);
+  }
+  app.post('/api/incidents', async (req, res) => {
+    res.status(201).json(await launchIncident(req.schoolId, req.user, req.body));
   });
   app.post('/api/incidents/:id/resolve', adminOnly, async (req, res) => {
     const result = await store.mutate(data => {

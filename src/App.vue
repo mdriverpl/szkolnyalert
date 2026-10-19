@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
-import { ShieldCheck, LayoutDashboard, Users, Building2, BookOpen, Bell, ChevronDown, ChevronRight, Plus, Search, ArrowUpRight, ArrowRight, Check, X, LogOut, Menu, Flame, HeartPulse, ShieldAlert, Clock3, CircleHelp, CheckCircle2, Pencil, Trash2, MapPin, Activity, Radio, LoaderCircle, Upload, Download, Settings, MessageSquare } from 'lucide-vue-next';
+import { ShieldCheck, LayoutDashboard, Users, Building2, BookOpen, Bell, ChevronDown, ChevronRight, Plus, Search, ArrowUpRight, ArrowRight, Check, X, LogOut, Menu, Flame, HeartPulse, ShieldAlert, Clock3, CircleHelp, CheckCircle2, Pencil, Trash2, MapPin, Activity, Radio, LoaderCircle, Upload, Download, Settings, MessageSquare, Link, Copy, KeyRound } from 'lucide-vue-next';
 
 const state = ref(null), loading = ref(true), busy = ref(false), error = ref(''), toast = ref(''), view = ref('dashboard'), schoolId = ref(''), query = ref(''), mobileMenu = ref(false), modal = ref(null), health = ref(null);
 const credentials = reactive({ login: '', password: '' });
@@ -37,13 +37,14 @@ async function removeSmsToken() {
 }
 const smsStatus = event => ({ disabled: 'SMS: wyłączone', pending: 'SMS: oczekuje na wysyłkę', sending: 'SMS: wysyłka rozpoczęta — sprawdź wynik w SMSAPI', no_recipients: 'SMS: brak numerów odbiorców', test: 'SMS: test API, bez dostarczenia', accepted: `SMS: przyjęto do wysyłki (${event.sms?.accepted || 0})`, partial: `SMS: przyjęto ${event.sms?.accepted || 0} z ${event.sms?.total || 0}`, failed: 'SMS: błąd wysyłki', unknown: 'SMS: wynik nieznany — sprawdź SMSAPI' }[event.sms?.status] || '');
 const dialog = ref(null);
+const teacherLink = ref(''), teacherKey = ref(''), accessCopied = ref(false);
 let previousFocus;
 watch(modal, async value => {
   if (value) {
     previousFocus = document.activeElement;
     await nextTick();
     (dialog.value?.querySelector('input, textarea, select') || dialog.value?.querySelector('button'))?.focus();
-  } else previousFocus?.focus();
+  } else { previousFocus?.focus(); teacherLink.value = ''; teacherKey.value = ''; accessCopied.value = false; }
 });
 function dialogKeys(event) {
   if (event.key === 'Escape') { close(); return; }
@@ -107,6 +108,26 @@ function open(type, record = null, mode = 'edit') {
   modal.value = { type, record, mode }; error.value = '';
 }
 function close() { if (!busy.value) { modal.value = null; error.value = ''; } }
+async function generateTeacherLink() {
+  busy.value = true; error.value = '';
+  try {
+    const result = await api(`/teachers/${modal.value.record.id}/panel-key`, { method: 'POST' });
+    teacherLink.value = new URL(result.path, window.location.origin).href; teacherKey.value = result.key;
+    modal.value.record.hasPanelKey = true; await refresh();
+  } catch (e) { error.value = e.message; } finally { busy.value = false; }
+}
+async function revokeTeacherLink() {
+  busy.value = true; error.value = '';
+  try {
+    await api(`/teachers/${modal.value.record.id}/panel-key`, { method: 'DELETE' });
+    modal.value.record.hasPanelKey = false; teacherLink.value = ''; teacherKey.value = ''; accessCopied.value = false;
+    await refresh(); notify('Unieważniono link i sesje panelu tego nauczyciela.');
+  } catch (e) { error.value = e.message; } finally { busy.value = false; }
+}
+async function copyTeacherLink() {
+  try { await navigator.clipboard.writeText(teacherLink.value); accessCopied.value = true; }
+  catch { error.value = 'Nie udało się skopiować automatycznie. Zaznacz link w polu i skopiuj go ręcznie.'; }
+}
 function openCsvImport() {
   Object.assign(csvImport, { file: null, filename: '', encoding: 'utf-8', text: '', preview: null });
   open('teachers', null, 'import');
@@ -138,6 +159,7 @@ async function commitCsvImport() {
 }
 const modalTitle = computed(() => {
   if (!modal.value) return '';
+  if (modal.value.mode === 'access') return 'Osobisty panel nauczyciela';
   if (modal.value.mode === 'import') return 'Import nauczycieli z CSV';
   if (modal.value.mode === 'launch') return 'Uruchom alert';
   if (modal.value.mode === 'delete') return 'Usunąć ten rekord?';
@@ -260,7 +282,7 @@ onUnmounted(() => { clearInterval(timer); clearTimeout(toastTimer); });
         <template v-else>
           <div class="list-toolbar"><div class="search-field"><Search :size="18"/><input v-model="query" :placeholder="view === 'teachers' ? 'Szukaj nauczyciela…' : 'Szukaj…'" aria-label="Szukaj rekordów"></div><div class="list-toolbar-actions"><span>{{ list.length }} {{ view === 'history' ? 'zdarzeń' : 'rekordów' }}</span><button v-if="view === 'teachers' && canManage" class="btn secondary" @click="openCsvImport"><Upload :size="16"/> Import CSV</button></div></div>
           <div v-if="!list.length" class="panel empty"><component :is="nav.find(n => n.id === view)?.icon" :size="36"/><h2>{{ query ? 'Brak wyników' : 'Tu zaczyna się dobra organizacja.' }}</h2><p>{{ query ? 'Spróbuj wpisać inne słowo.' : canManage ? 'Dodaj pierwszy rekord, korzystając z przycisku powyżej.' : 'Administrator szkoły nie dodał jeszcze wpisów.' }}</p></div>
-          <div v-else-if="view === 'teachers'" class="panel table-wrap"><table><thead><tr><th>Nauczyciel</th><th>Przedmiot / rola</th><th>Kontakt</th><th>Telefon</th><th><span class="sr-only">Działania</span></th></tr></thead><tbody><tr v-for="t in list" :key="t.id"><td><div class="person-cell"><span class="avatar">{{ initials(t.name) }}</span><strong>{{ t.name }}</strong></div></td><td>{{ t.subject }}</td><td><a :href="'mailto:' + t.email">{{ t.email }}</a></td><td><a v-if="t.phone" :href="'tel:' + t.phone.replace(/[^0-9+]/g, '')">{{ t.phone }}</a><span v-else class="muted">—</span></td><td><div v-if="canManage" class="actions"><button class="icon-button" :aria-label="'Edytuj: ' + t.name" @click="open('teachers', t)"><Pencil :size="16"/></button><button class="icon-button" :aria-label="'Usuń: ' + t.name" @click="open('teachers', t, 'delete')"><Trash2 :size="16"/></button></div></td></tr></tbody></table></div>
+          <div v-else-if="view === 'teachers'" class="panel table-wrap"><table><thead><tr><th>Nauczyciel</th><th>Przedmiot / rola</th><th>Kontakt</th><th>Telefon</th><th><span class="sr-only">Działania</span></th></tr></thead><tbody><tr v-for="t in list" :key="t.id"><td><div class="person-cell"><span class="avatar">{{ initials(t.name) }}</span><strong>{{ t.name }}</strong></div></td><td>{{ t.subject }}</td><td><a :href="'mailto:' + t.email">{{ t.email }}</a></td><td><a v-if="t.phone" :href="'tel:' + t.phone.replace(/[^0-9+]/g, '')">{{ t.phone }}</a><span v-else class="muted">—</span></td><td><div v-if="canManage" class="actions"><button class="icon-button teacher-panel-link" :aria-label="'Panel nauczyciela: ' + t.name" :title="t.hasPanelKey ? 'Zarządzaj osobistym linkiem' : 'Utwórz osobisty link'" @click="open('teachers', t, 'access')"><Link :size="17"/></button><button class="icon-button" :aria-label="'Edytuj: ' + t.name" @click="open('teachers', t)"><Pencil :size="16"/></button><button class="icon-button" :aria-label="'Usuń: ' + t.name" @click="open('teachers', t, 'delete')"><Trash2 :size="16"/></button></div></td></tr></tbody></table></div>
           <div v-else-if="view === 'users'" class="panel table-wrap"><table><thead><tr><th>Użytkownik</th><th>Login</th><th>Telefon</th><th>Rola</th><th>Działania</th></tr></thead><tbody><tr v-for="u in list" :key="u.id"><td><div class="person-cell"><span class="avatar">{{ initials(u.name) }}</span><strong>{{ u.name }}</strong></div></td><td>{{ u.username }}</td><td><a v-if="u.phone" :href="'tel:' + u.phone.replace(/[^0-9+]/g, '')">{{ u.phone }}</a><span v-else class="muted">—</span></td><td><span class="badge neutral">{{ u.role === 'admin' ? 'Administrator' : 'Nauczyciel' }}</span></td><td><div class="actions"><button class="icon-button" :aria-label="'Edytuj: ' + u.name" @click="open('users', u)"><Pencil :size="16"/></button><button class="icon-button" :aria-label="'Usuń: ' + u.name" @click="open('users', u, 'delete')"><Trash2 :size="16"/></button></div></td></tr></tbody></table></div>
           <div v-else-if="view === 'history'" class="history-list"><article v-for="event in list" :key="event.id" :class="['panel event-card', { 'event-critical': event.status === 'active' && event.severity === 'critical' } ]"><span :class="['alert-icon', event.status === 'active' ? event.severity : 'info']"><component :is="event.status === 'active' ? Radio : CheckCircle2" :size="24"/></span><div class="event-main"><span :class="['badge', event.status === 'active' ? event.severity : 'success']">{{ event.status === 'active' ? 'Aktywne' : 'Zakończone' }}</span><h2>{{ event.name }}</h2><span v-if="event.isDemo" class="event-demo-label">SCENARIUSZ DEMONSTRACYJNY</span><p><MapPin :size="14"/> {{ event.location }} <span>· {{ date(event.createdAt) }}</span></p><div v-if="event.sms" :class="['sms-event-status', event.sms.status]"><strong>{{ smsStatus(event) }}</strong><p v-if="event.sms.message">{{ event.sms.message }}</p></div><small v-if="event.resolvedAt">Zakończono: {{ date(event.resolvedAt) }}</small><details v-if="event.procedure"><summary>Procedura postępowania</summary><ol><li v-for="step in event.procedure.steps" :key="step">{{ step }}</li></ol></details></div><button v-if="canManage && event.status === 'active'" class="btn secondary" @click="open('incidents', event, 'resolve')"><Check :size="16"/> Zakończ</button></article></div>
           <div v-else class="record-grid"><article v-for="item in list" :key="item.id" :class="['panel record-card', { 'record-critical': view === 'alerts' && item.severity === 'critical' }]"><div class="record-top"><span :class="['stat-icon', view === 'alerts' ? item.severity : 'sage']"><component :is="view === 'schools' ? Building2 : view === 'procedures' ? BookOpen : alertIcon(item)" :size="23"/></span><span v-if="view === 'alerts'" :class="['badge', item.severity]">{{ level(item.severity) }}</span><span v-if="view === 'procedures'" class="badge neutral">{{ item.category }}</span></div><h2>{{ item.name }}</h2><p>{{ view === 'schools' ? [item.address, item.city].filter(Boolean).join(', ') || 'Dane adresowe możesz uzupełnić później.' : item.description }}</p><div v-if="view === 'alerts'" class="linked-procedure"><BookOpen :size="15"/>{{ procedures.find(p => p.id === item.procedureId)?.name }}</div><div v-if="view === 'procedures'" class="linked-procedure"><CheckCircle2 :size="15"/>{{ item.steps.length }} kroki postępowania</div><div class="record-actions"><button v-if="view === 'alerts'" class="text-link" @click="open('alerts', item, 'launch')">Uruchom alert <ArrowUpRight :size="16"/></button><button v-else-if="view === 'procedures'" class="text-link" @click="open('procedures', item, 'detail')">Otwórz procedurę <ArrowRight :size="16"/></button><button v-else class="text-link" @click="navigate('dashboard')">Pulpit szkoły <ArrowRight :size="16"/></button><div v-if="canManage" class="actions"><button class="icon-button" :aria-label="'Edytuj: ' + item.name" @click="open(view, item)"><Pencil :size="16"/></button><button v-if="view !== 'schools'" class="icon-button" :aria-label="'Usuń: ' + item.name" @click="open(view, item, 'delete')"><Trash2 :size="16"/></button></div></div></article></div>
@@ -282,6 +304,13 @@ onUnmounted(() => { clearInterval(timer); clearTimeout(toastTimer); });
             <div class="csv-preview table-wrap"><table><thead><tr><th>Wiersz</th><th>Imię i nazwisko</th><th>E-mail</th><th>Przedmiot / rola</th><th>Telefon</th><th>Wynik walidacji</th></tr></thead><tbody><tr v-for="row in csvImport.preview.rows" :key="row.line" :class="{ 'csv-error-row': row.status === 'error' }"><td>{{ row.line }}</td><td>{{ row.teacher.name }}</td><td>{{ row.teacher.email }}</td><td>{{ row.teacher.subject }}</td><td>{{ row.teacher.phone || '—' }}</td><td><span :class="['badge', row.status === 'ready' ? 'success' : row.status === 'error' ? 'critical' : 'warning']">{{ row.status === 'ready' ? 'Gotowy' : row.status === 'error' ? 'Błąd' : 'Pominięty' }}</span><small v-if="row.message" class="csv-row-message">{{ row.message }}</small></td></tr></tbody></table></div>
           </template>
           <div class="modal-footer"><button type="button" class="btn secondary" :disabled="busy" @click="close">Anuluj</button><button type="button" class="btn primary" :disabled="busy || !csvImport.preview?.ready || csvImport.preview.invalid > 0" @click="commitCsvImport"><Upload :size="16"/> Importuj nauczycieli ({{ csvImport.preview?.ready || 0 }})</button></div>
+        </div>
+      </template>
+      <template v-else-if="modal.mode === 'access'">
+        <div class="teacher-access-admin"><p class="modal-description"><strong>{{ modal.record.name }}</strong><br>{{ school?.name }}</p><p class="form-hint">Nauczyciel otworzy ten link bez hasła do panelu administratora. Zobaczy przycisk uruchomienia alertu oraz aktywne procedury wyłącznie swojej szkoły.</p>
+          <template v-if="teacherLink"><label>Osobisty link<textarea :value="teacherLink" readonly rows="3" class="teacher-link-value" @focus="$event.target.select()"></textarea></label><label>Klucz dostępu<input :value="teacherKey" readonly class="teacher-link-value" @focus="$event.target.select()"></label><button class="btn primary full" @click="copyTeacherLink"><Copy :size="16"/>{{ accessCopied ? 'Link skopiowany' : 'Kopiuj link dla nauczyciela' }}</button><p class="form-hint teacher-access-note">Klucz jest częścią linku. Skopiuj go teraz — nie będzie ponownie wyświetlany po zamknięciu tego okna.</p></template>
+          <template v-else><p v-if="modal.record.hasPanelKey" class="teacher-access-rotation">Ten nauczyciel ma już link. Wygenerowanie nowego klucza unieważni poprzedni link oraz sesje na jego urządzeniach.</p><button class="btn primary full" :disabled="busy" @click="generateTeacherLink"><KeyRound :size="16"/>{{ busy ? 'Generowanie…' : modal.record.hasPanelKey ? 'Wygeneruj nowy link i klucz' : 'Wygeneruj link i klucz' }}</button></template>
+          <p class="form-hint teacher-access-note">Link działa pod adresem serwera, z którego korzystasz. Aby udostępnić go na telefonach poza tym komputerem, aplikacja musi działać pod dostępnym adresem HTTPS.</p><p v-if="error" class="error" role="alert">{{ error }}</p><div class="modal-footer"><button v-if="modal.record.hasPanelKey" class="text-link" :disabled="busy" @click="revokeTeacherLink">Unieważnij link</button><button class="btn secondary" :disabled="busy" @click="close">Zamknij</button></div>
         </div>
       </template>
       <template v-else-if="modal.mode === 'detail'"><p class="modal-description">{{ modal.record.description }}</p><ol class="steps"><li v-for="(step, i) in modal.record.steps" :key="i"><span>{{ i + 1 }}</span><p>{{ step }}</p></li></ol><div class="modal-footer"><button class="btn secondary" @click="close">Zamknij</button></div></template>

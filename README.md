@@ -105,4 +105,26 @@ Po buildzie frontend i API działają pod http://127.0.0.1:3001. Serwer nasłuch
 
 ## Android i iOS
 
-Interfejs działa w przeglądarce mobilnej. Po udostępnieniu przez HTTPS można dodać go do ekranu początkowego jako PWA (Android: menu przeglądarki; iOS: Safari → Udostępnij → Do ekranu początkowego). API wymaga połączenia z serwerem i nie jest buforowane offline. Projekt nie zawiera jeszcze pakietów App Store / Google Play.
+Interfejs działa w przeglądarce mobilnej. Po udostępnieniu przez HTTPS można dodać go do ekranu początkowego jako PWA (Android: menu przeglądarki; iOS: Safari → Udostępnij → Do ekranu początkowego). Projekt nie zawiera pakietów App Store / Google Play.
+
+### Osobisty panel nauczyciela
+
+1. Administrator otwiera **Nauczyciele** i klika ikonę linku przy wybranej osobie.
+2. Wybiera **Wygeneruj link i klucz**, kopiuje link i przekazuje go bezpośrednio właściwemu nauczycielowi. Link jest generowany z adresu, pod którym administrator otworzył aplikację — do udostępniania poza komputerem użyj publicznego adresu HTTPS.
+3. Nauczyciel otwiera link `/nauczyciel#klucz=…` lub wpisuje klucz na stronie `/nauczyciel`. Nie otrzymuje dostępu do panelu administracyjnego ani listy kontaktów.
+4. Panel pokazuje imię i nazwisko, szkołę, duży przycisk **URUCHOM ALERT** oraz aktywne zdarzenia. Każde aktywne zdarzenie ma od razu widoczną pełną procedurę bezpieczeństwa. Uruchomienie wymaga wyboru alertu i podania miejsca zdarzenia.
+5. W otwartym panelu dane odświeżają się co 3 sekundy oraz po powrocie do aplikacji. Po uruchomieniu własnego alertu procedura pojawia się od razu; wysyłka SMS jest obsługiwana niezależnie i nie opóźnia odpowiedzi panelu nauczyciela. Alarm kończy administrator.
+
+Każdy nauczyciel ma własny losowy klucz 256-bitowy. Serwer przechowuje tylko jego skrót SHA-256. Klucz jest pokazywany administratorowi tylko po wygenerowaniu, znajduje się we fragmencie URL (nie w ścieżce ani query string) i po wymianie na sesję jest usuwany z paska adresu. Sesja nauczyciela ma oddzielne cookie HTTP-only/SameSite i trwa 30 dni; przeżywa restart backendu. Nie zastępuje sesji administratora, więc podgląd panelu nie wylogowuje administratora. Wygenerowanie nowego klucza, unieważnienie linku lub usunięcie nauczyciela natychmiast odcina poprzedni dostęp i sesje. Uprawnienia są zawsze ograniczone do szkoły przypisanej nauczycielowi.
+
+Sam link jest kluczem dostępu — nie publikuj go w repozytorium ani nie przekazuj innym osobom. Kopię linku zachowuje odbiorca; po zamknięciu okna administrator generuje nowy klucz, jeżeli potrzebuje ponownie udostępnić dostęp.
+
+### Instalacja i brak połączenia
+
+Panel nauczyciela ma przycisk **Zainstaluj aplikację**, własny manifest `teacher.webmanifest` i startuje jako osobna PWA pod `/nauczyciel`. Jeżeli przeglądarka nie udostępnia systemowego okna instalacji, wyświetlane są instrukcje dla Androida i iOS. Na telefonie wymagany jest dostępny adres HTTPS; `127.0.0.1` wskazuje samo urządzenie i służy do testów na komputerze.
+
+Build generuje wersjonowany service worker `dist/sw.js` z listą rzeczywistych plików JS/CSS oraz ikon. W trybie developerskim service worker nie jest rejestrowany. Aby sprawdzić pełną wersję PWA, uruchom `npm.cmd run build` i otwórz aplikację udostępnianą przez backend pod http://127.0.0.1:3001/nauczyciel.
+
+Service worker przechowuje wyłącznie pliki interfejsu. Nie buforuje API, kluczy, sesji, danych szkoły ani stanów alertów. Bez sieci aplikacja może otworzyć interfejs, lecz nie potwierdza aktualnego stanu zagrożeń i blokuje uruchamianie alertów. Jeśli panel był już otwarty, ostatnia procedura pozostaje widoczna z ostrzeżeniem o nieaktualności. Po ponownym uruchomieniu offline dane szkoły nie są odtwarzane z pamięci podręcznej. Powiadomienia push przy zamkniętej aplikacji nie są jeszcze zaimplementowane; niezależnym kanałem jest skonfigurowana bramka SMSAPI.
+
+Przy wdrożeniu za lokalnym reverse proxy aplikacja ufa nagłówkom proxy tylko z loopback. Proxy musi przekazywać oryginalny `Host` i `X-Forwarded-Proto: https`, aby poprawnie działała kontrola źródła żądań i bezpieczne cookies.

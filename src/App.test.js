@@ -88,6 +88,14 @@ test('register a school without previous login, create its teacher account, and 
   assert.equal(document.querySelector('.modal input[type="tel"]').value, '+48 500 600 710');
   await fill(['Anna Testowa', 'anna.test@example.com', '+48 500 600 711', 'Matematyka']); submit();
   await waitFor(() => !document.querySelector('.modal') && document.querySelector('a[href="tel:+48500600711"]'));
+  document.querySelector('[aria-label="Panel nauczyciela: Anna Testowa"]').click();
+  await waitFor(() => document.querySelector('.teacher-access-admin'));
+  button('Wygeneruj link i klucz').click();
+  await waitFor(() => document.querySelector('.teacher-link-value'));
+  const personalLink = document.querySelector('.teacher-link-value').value;
+  assert.ok(personalLink.startsWith(base + '/nauczyciel#klucz='));
+  assert.match(personalLink.split('klucz=')[1], /^[a-f0-9]{64}$/);
+  document.querySelector('.modal [aria-label="Zamknij"]').click(); await nextTick();
   button('Import CSV').click();
   await waitFor(() => document.querySelector('.csv-modal input[type="file"]'));
   const csv = 'imię i nazwisko;email;przedmiot;telefon\nZofia CSV;zofia.csv@example.com;Historia;+48 500 600 720\nAnna Testowa;anna.test@example.com;Matematyka;';

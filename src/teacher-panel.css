@@ -1,0 +1,77 @@
+.teacher-app { min-height: 100dvh; background: #f2f5fa; color: #233b58; }
+.teacher-header { background: #142237; padding: 22px max(22px, calc((100vw - 900px)/2)); display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.teacher-header .brand { font-size: 24px; }
+.teacher-header .brand > svg { color: #ff7787; }
+.teacher-logout { display: flex; padding: 9px; border: 1px solid #3f4f66; color: #b5c5dd; border-radius: 7px; }
+main.teacher-main { max-width: 900px; padding: 30px 24px 10px; margin: auto; }
+.teacher-identity { margin-bottom: 27px; }
+.teacher-identity h1 { font-size: 30px; letter-spacing: -.8px; margin: 12px 0 7px; }
+.teacher-identity > p { font-size: 12px; color: #8b99ad; }
+.teacher-connection { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; font-size: 10px; color: #8798ad; margin-top: 18px; }
+.teacher-connection > span:last-child { font-size: 9px; }
+.teacher-offline { display: flex; gap: 14px; padding: 18px; border: 1px solid #e4c590; background: #fff6e5; color: #956827; border-radius: 10px; margin-bottom: 24px; }
+.teacher-offline strong { font-size: 13px; }
+.teacher-offline p { font-size: 11px; line-height: 1.8; margin: 7px 0; }
+.teacher-offline .text-link { color: #956827; margin-top: 9px; }
+.teacher-emergency { background: #b51935; color: #fff; border: 1px solid #a5102b; border-radius: 14px; padding: 28px; box-shadow: 0 8px 25px #b5193515; margin-bottom: 23px; }
+.teacher-emergency.warning { background: #916019; border-color: #80500f; color: #fff; }
+.teacher-emergency.info { background: #284e7f; border-color: #203f67; color: #fff; }
+.teacher-emergency-heading { display: flex; align-items: center; gap: 16px; }
+.teacher-emergency-heading span { font-size: 9px; letter-spacing: 1.5px; opacity: .8; font-weight: 600; }
+.teacher-emergency h2 { font-size: 26px; margin-top: 7px; letter-spacing: -.6px; }
+.teacher-drill { display: inline-block; border: 1px solid #ffffff4a; border-radius: 4px; padding: 6px 9px; margin: 19px 0 0; font-size: 8px; letter-spacing: 1px; }
+.teacher-event-meta { display: flex; flex-wrap: wrap; gap: 18px; margin: 20px 0 24px; font-size: 11px; color: #ffe3e9; }
+.teacher-event-meta > span { display: flex; align-items: center; gap: 7px; }
+.teacher-safety-procedure { background: #fff; color: #273f5c; border-radius: 11px; padding: 25px; }
+.teacher-safety-procedure .eyebrow { color: #ad2942; font-size: 9px; }
+.teacher-safety-procedure h3 { font-size: 21px; letter-spacing: -.5px; margin: 12px 0; }
+.teacher-procedure-description { font-size: 10px; line-height: 1.9; color: #8494a8; border-bottom: 1px solid #e6ebf3; padding-bottom: 18px; }
+.teacher-safety-procedure ol { list-style: none; padding: 0; margin: 23px 0 0; }
+.teacher-safety-procedure li { display: flex; gap: 14px; margin-top: 21px; }
+.teacher-safety-procedure li > span { flex-shrink: 0; width: 31px; height: 31px; display: flex; align-items: center; justify-content: center; background: #fff0f3; color: #b51935; border-radius: 50%; font-weight: 600; font-size: 12px; }
+.teacher-safety-procedure li p { font-size: 14px; line-height: 1.9; padding-top: 2px; }
+.teacher-emergency-note { font-size: 10px; line-height: 1.9; opacity: .8; margin: 18px 3px 0; }
+.teacher-calm { text-align: center; padding: 33px; background: #fff; }
+.teacher-calm > svg { color: #4c9773; }
+.teacher-calm h2 { font-size: 21px; margin: 18px 0 12px; }
+.teacher-calm p { font-size: 12px; line-height: 1.9; color: #8797aa; max-width: 430px; margin: auto; }
+.teacher-calm.stale > svg { color: #b0915f; }
+.teacher-launch { margin: 26px 0; }
+.teacher-alert-button { display: flex; align-items: center; justify-content: space-between; gap: 18px; background: #cb213f; color: #fff; width: 100%; border-radius: 11px; padding: 24px; box-shadow: 0 5px 15px #cb213f1c; }
+.teacher-alert-button > span { flex: 1; text-align: left; font-family: Manrope,sans-serif; font-size: 21px; font-weight: 800; letter-spacing: .5px; }
+.teacher-alert-button small { display: block; font-family: 'DM Sans',sans-serif; font-size: 11px; font-weight: 400; letter-spacing: 0; color: #ffccd6; margin-top: 7px; }
+.teacher-launch > p { font-size: 10px; text-align: center; color: #8e9db0; line-height: 1.8; margin: 12px 10px 0; }
+.teacher-install { padding: 23px; border: 1px solid #dfe6f0; background: #edf2fa; border-radius: 10px; display: flex; flex-wrap: wrap; gap: 20px; align-items: center; justify-content: space-between; }
+.teacher-install > div:first-child { display: flex; align-items: center; gap: 12px; }
+.teacher-install strong { display: block; font-size: 12px; }
+.teacher-install small { display: block; font-size: 10px; color: #8498b3; line-height: 1.8; margin-top: 6px; }
+.teacher-install-help { width: 100%; border-top: 1px solid #d9e3f0; padding-top: 15px; }
+.teacher-install-help p { font-size: 11px; line-height: 1.9; margin-bottom: 10px; color: #6c83a1; }
+.teacher-install-help strong { display: inline; font-size: inherit; }
+.teacher-footer { max-width: 900px; margin: auto; padding: 23px 24px; font-size: 9px; }
+.teacher-footer > span { font-size: 8px; }
+.teacher-access { max-width: 440px; margin: 55px auto; padding: 30px; }
+.teacher-access > svg { color: #6a86ab; }
+.teacher-access h1 { font-size: 25px; letter-spacing: -.7px; margin: 20px 0 12px; }
+.teacher-access > p { font-size: 12px; line-height: 1.9; color: #8497b0; margin-bottom: 20px; }
+.teacher-access > .text-link { margin-top: 18px; }
+.teacher-loading { display: flex; align-items: center; justify-content: center; flex-direction: column; min-height: 50vh; gap: 20px; color: #8298b5; font-size: 12px; }
+@media(max-width:600px) {
+  .teacher-header { padding: 18px; }
+  main.teacher-main { padding: 24px 14px 10px; }
+  .teacher-identity { padding: 0 6px; }
+  .teacher-identity h1 { font-size: 26px; }
+  .teacher-emergency { padding: 21px 15px 16px; border-radius: 11px; }
+  .teacher-emergency-heading { gap: 11px; }
+  .teacher-emergency h2 { font-size: 22px; }
+  .teacher-safety-procedure { padding: 23px 17px; }
+  .teacher-safety-procedure h3 { font-size: 20px; }
+  .teacher-safety-procedure li { gap: 11px; }
+  .teacher-safety-procedure li p { font-size: 14px; }
+  .teacher-alert-button { padding: 22px 18px; gap: 13px; }
+  .teacher-alert-button > span { font-size: 19px; }
+  .teacher-install { padding: 20px 17px; }
+  .teacher-install > .btn { width: 100%; }
+  .teacher-footer { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .teacher-access { margin: 25px auto; padding: 25px; }
+}

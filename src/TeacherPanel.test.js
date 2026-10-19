@@ -1,0 +1,65 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
+import { Window } from 'happy-dom';
+import { parse, compileScript } from '@vue/compiler-sfc';
+import { createApp as createApi } from '../server/app.js';
+import { createStore } from '../server/store.js';
+
+test('personal panel launches an alert, shows its procedure immediately, and never reports offline data as current', async t => {
+  const store = await createStore({ memory: true });
+  await store.mutate(data => { data.incidents = [{ id: 'foreign-event', schoolId: 'school-demo-2', status: 'active', name: 'Foreign event', location: 'Foreign location', severity: 'critical', createdAt: new Date().toISOString(), procedure: data.procedures.find(x => x.id === 'procedure-6') }]; });
+  const server = createApi(store).listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`, originalFetch = globalThis.fetch;
+  const login = await originalFetch(base + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: 'admin@szkolnyalert.pl', password: 'demo12345' }) });
+  const adminCookie = login.headers.get('set-cookie').split(';')[0];
+  const admin = (path, method = 'POST') => originalFetch(base + '/api' + path, { method, headers: { Cookie: adminCookie, 'Content-Type': 'application/json' } });
+  const access = await (await admin('/teachers/teacher-1/panel-key')).json();
+  const window = new Window({ url: base + access.path });
+  let app, teacherCookie = '';
+  for (const key of ['window', 'document', 'navigator', 'Document', 'ShadowRoot', 'Element', 'HTMLElement', 'SVGElement', 'Node']) Object.defineProperty(globalThis, key, { configurable: true, value: key === 'window' ? window : window[key] });
+  globalThis.fetch = async (path, options = {}) => {
+    const response = await originalFetch(new URL(path, base), { ...options, headers: { ...options.headers, Cookie: teacherCookie, Origin: base } });
+    if (response.headers.get('set-cookie')) teacherCookie = response.headers.get('set-cookie').split(';')[0];
+    return response;
+  };
+  t.after(async () => { app?.unmount(); globalThis.fetch = originalFetch; await window.happyDOM.close(); await new Promise(resolve => server.close(resolve)); await store.close(); });
+  const { descriptor } = parse(await readFile(new URL('./TeacherPanel.vue', import.meta.url), 'utf8'));
+  let code = compileScript(descriptor, { id: 'teacher-panel-test', inlineTemplate: true }).content;
+  for (const name of ['vue', 'lucide-vue-next']) code = code.replaceAll(`from '${name}'`, `from '${import.meta.resolve(name)}'`).replaceAll(`from "${name}"`, `from "${import.meta.resolve(name)}"`);
+  const { default: TeacherPanel } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
+  const { createApp, nextTick } = await import('vue'); const errors = [];
+  function mount() { document.body.innerHTML = '<div id="app"></div>'; app = createApp(TeacherPanel); app.config.errorHandler = e => errors.push(e); app.mount('#app'); }
+  const waitFor = async predicate => {
+    for (let i = 0; i < 200; i++) { await nextTick(); if (errors.length) throw errors[0]; if (predicate()) return; await delay(10); }
+    throw new Error('Teacher panel did not reach the expected state: ' + document.body.textContent.slice(-1200));
+  };
+  mount(); await waitFor(() => document.querySelector('.teacher-calm'));
+  assert.equal(window.location.hash, '', 'access key is removed from the visible URL');
+  assert.match(document.querySelector('.teacher-identity').textContent, /Anna Kowalska/);
+  assert.equal(document.body.textContent.includes('Foreign location'), false);
+  document.querySelector('.teacher-alert-button').click();
+  await waitFor(() => document.querySelector('.teacher-launch-modal input'));
+  const location = document.querySelector('.teacher-launch-modal input'); location.value = 'Sala 43'; location.dispatchEvent(new window.Event('input', { bubbles: true })); await nextTick();
+  document.querySelector('.teacher-launch-modal form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await waitFor(() => document.querySelector('.teacher-safety-procedure'));
+  assert.match(document.querySelector('.teacher-emergency').textContent, /Sala 43/);
+  assert.ok(document.querySelectorAll('.teacher-safety-procedure li').length >= 3);
+  assert.equal(document.querySelector('.teacher-launch-modal'), null);
+  const event = (await store.read()).incidents.find(x => x.schoolId === 'school-demo' && x.status === 'active');
+  assert.equal(event.createdByTeacherId, 'teacher-1');
+  app.unmount(); mount(); await waitFor(() => document.querySelector('.teacher-safety-procedure'));
+  document.querySelector('.teacher-install .btn').click(); await nextTick();
+  assert.match(document.querySelector('.teacher-install-help').textContent, /iPhone/);
+  window.dispatchEvent(new window.Event('offline')); await nextTick();
+  assert.equal(document.querySelector('.teacher-alert-button').disabled, true);
+  assert.ok(document.querySelector('.teacher-offline'));
+  assert.ok(document.querySelector('.teacher-safety-procedure'), 'last known procedure stays visible while clearly marked stale');
+  await admin(`/incidents/${event.id}/resolve`);
+  window.dispatchEvent(new window.Event('online')); await waitFor(() => document.querySelector('.teacher-calm') && !document.querySelector('.teacher-offline'));
+  assert.match(document.querySelector('.teacher-calm h2').textContent, /Brak aktywnych/);
+  await admin('/teachers/teacher-1/panel-key', 'DELETE');
+  window.dispatchEvent(new window.Event('online')); await waitFor(() => document.querySelector('.teacher-access'));
+  assert.equal(document.querySelector('.teacher-identity'), null);
+});
