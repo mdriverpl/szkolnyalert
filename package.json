@@ -1,0 +1,26 @@
+{
+  "name": "szkolny-alert",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "dev:web": "vite --host 127.0.0.1",
+    "dev:api": "node --watch server/index.js",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "test": "node --test server/*.test.js src/*.test.js"
+  },
+  "dependencies": {
+    "csv-parse": "^7.0.3",
+    "express": "^5.1.0",
+    "lucide-vue-next": "^0.468.0",
+    "pg": "^8.13.1",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "happy-dom": "^21.0.3",
+    "vite": "^6.0.5"
+  }
+}
