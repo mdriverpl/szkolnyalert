@@ -25,7 +25,9 @@ docker compose --env-file .env.server -f compose.app.yaml logs -f app
 
 W Compose konfiguracja JSON jest wymuszona: produkcja, bez kont demo, `/data/app.json` i kopie w `/data/backups`. Pierwsza instalacja ma pusty magazyn. Załóż szkołę formularzem **Dodaj szkołę**.
 
-Plik `.env.server` nie jest automatycznie ładowany przez Docker Compose bez `--env-file`. Nie przesyłaj go do GitHub. Port `3001` jest dostępny tylko na loopback serwera. Postaw przed nim Nginx HTTPS według `deploy/nginx.conf.example`. Kontener nasłuchuje na `0.0.0.0`, działa jako użytkownik `node`, ma pliki aplikacji tylko do odczytu i zapisuje dane w osobnym wolumenie.
+Plik `.env.server` nie jest automatycznie ładowany przez Docker Compose bez `--env-file`. Nie przesyłaj go do GitHub. Na serwerze aplikacja jest dostępna pod `http://127.0.0.1:8080/`, a wewnątrz kontenera nadal na porcie `3001`. Mapowanie to `127.0.0.1:8080:3001`; port hosta można zmienić zmienną `HOST_PORT`. Monitoring hostingu powinien sprawdzać `http://127.0.0.1:8080/api/health` lub stronę główną na tym samym porcie.
+
+Postaw przed kontenerem Nginx HTTPS według `deploy/nginx.conf.example`, zmieniając `proxy_pass` z portu `3001` (instalacja natywna) na `http://127.0.0.1:8080` (Docker). Kontener nasłuchuje na `0.0.0.0`, działa jako użytkownik `node`, ma pliki aplikacji tylko do odczytu i zapisuje dane w osobnym wolumenie. Status `healthy` kontenera przy niedostępności portu hosta zwykle oznacza błędne mapowanie portów lub adres upstream proxy; restart kontenera nie poprawia konfiguracji mapowania.
 
 Połączenie hostowego Nginx z kontenerem przechodzi przez prywatny most Dockera, dlatego Compose ustawia `TRUST_PROXY=loopback,linklocal,uniquelocal`. Ta konfiguracja zakłada, że port kontenera pozostaje przypięty do `127.0.0.1`. Nie wystawiaj go bezpośrednio do Internetu. Jeśli reverse proxy jest na innym serwerze lub w innej sieci, ustaw `TRUST_PROXY` na konkretne zaufane adresy/CIDR; proxy musi nadpisywać `Host` i `X-Forwarded-Proto`.
 

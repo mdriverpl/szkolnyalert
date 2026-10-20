@@ -19,7 +19,7 @@ services:
       # Host Nginx connects through Docker's private bridge. Host port stays on loopback.
       TRUST_PROXY: ${TRUST_PROXY:-loopback,linklocal,uniquelocal}
     ports:
-      - '127.0.0.1:3001:3001'
+      - '127.0.0.1:${HOST_PORT:-8080}:3001'
     volumes:
       - app_data:/data
     read_only: true
