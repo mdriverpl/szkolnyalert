@@ -1,19 +1,34 @@
 services:
-  db:
-    image: postgres:17-alpine
+  app:
+    image: ghcr.io/mdriverpl/szkolnyalert:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
     environment:
-      POSTGRES_USER: szkolnyalert
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Ustaw POSTGRES_PASSWORD w pliku .env}
-      POSTGRES_DB: szkolnyalert
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: '3001'
+      STORAGE_DRIVER: json
+      DEMO_DATA: 'false'
+      DATA_DIR: /data
+      JSON_FILE: app.json
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:?Ustaw publiczny adres HTTPS w pliku env}
+      SMS_ENCRYPTION_KEY: ${SMS_ENCRYPTION_KEY:?Ustaw trwały klucz szyfrowania w pliku env}
+      JSON_BACKUP_INTERVAL_MINUTES: ${JSON_BACKUP_INTERVAL_MINUTES:-60}
+      JSON_BACKUP_LIMIT: ${JSON_BACKUP_LIMIT:-48}
+      # Host Nginx connects through Docker's private bridge. Host port stays on loopback.
+      TRUST_PROXY: ${TRUST_PROXY:-loopback,linklocal,uniquelocal}
     ports:
-      - "127.0.0.1:5432:5432"
+      - '127.0.0.1:${HOST_PORT:-8080}:3001'
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U szkolnyalert"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      - app_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
 volumes:
-  postgres_data:
+  app_data:

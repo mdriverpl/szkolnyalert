@@ -72,7 +72,7 @@ Hasła są przechowywane jako skróty scrypt z losową solą. API nigdy nie zwra
 
 1. Skopiuj `.env.example` do `.env`.
 2. Ustaw `POSTGRES_PASSWORD` i `DATABASE_URL` z tym samym hasłem.
-3. Uruchom PostgreSQL lokalnie lub `docker compose up -d db`, jeżeli masz Docker Desktop.
+3. Uruchom PostgreSQL lokalnie lub `docker compose -f compose.postgres.yaml up -d db`, jeżeli masz Docker Desktop.
 4. Uruchom aplikację i użyj formularza **Dodaj szkołę**, aby utworzyć pierwszą placówkę i administratora.
 
 Przykładowy URL: `postgresql://szkolnyalert:TWOJE_HASLO@localhost:5432/szkolnyalert`. Znaki specjalne hasła należy zakodować w URL. Nowa baza jest pusta; nie są do niej importowane konta demo.

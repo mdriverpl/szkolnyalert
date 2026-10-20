@@ -17,6 +17,8 @@ Pakiet: https://github.com/users/mdriverpl/packages/container/package/szkolnyale
 
 Na serwerze z Docker Engine i Docker Compose umieść `compose.app.yaml` oraz prywatny plik `.env.server`. Wzorem konfiguracji jest `.env.production.example`. Ustaw faktyczny publiczny `PUBLIC_APP_URL` z HTTPS oraz trwały `SMS_ENCRYPTION_KEY` (ten sam przy przenoszeniu istniejących danych). Compose nie włącza bazy PostgreSQL.
 
+Domyślny `compose.yaml` zawiera tę samą aplikację co `compose.app.yaml`, więc panele używające automatycznie `compose.yaml` również uruchomią obraz GHCR i mapowanie host `8080` → kontener `3001`. Opcjonalny PostgreSQL został przeniesiony do `compose.postgres.yaml`.
+
 ```sh
 docker compose --env-file .env.server -f compose.app.yaml pull
 docker compose --env-file .env.server -f compose.app.yaml up -d
