@@ -1,0 +1,34 @@
+services:
+  app:
+    image: ghcr.io/mdriverpl/szkolnyalert:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: '3001'
+      STORAGE_DRIVER: json
+      DEMO_DATA: 'false'
+      DATA_DIR: /data
+      JSON_FILE: app.json
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:?Ustaw publiczny adres HTTPS w pliku env}
+      SMS_ENCRYPTION_KEY: ${SMS_ENCRYPTION_KEY:?Ustaw trwały klucz szyfrowania w pliku env}
+      JSON_BACKUP_INTERVAL_MINUTES: ${JSON_BACKUP_INTERVAL_MINUTES:-60}
+      JSON_BACKUP_LIMIT: ${JSON_BACKUP_LIMIT:-48}
+      # Host Nginx connects through Docker's private bridge. Host port stays on loopback.
+      TRUST_PROXY: ${TRUST_PROXY:-loopback,linklocal,uniquelocal}
+    ports:
+      - '127.0.0.1:3001:3001'
+    volumes:
+      - app_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  app_data:

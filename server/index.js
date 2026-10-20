@@ -5,6 +5,7 @@ import { storageConfig } from './config.js';
 if (existsSync('.env')) process.loadEnvFile('.env');
 const store = await createStore(storageConfig());
 const app = createApp(store);
-const server = app.listen(Number(process.env.PORT || 3001), '127.0.0.1', () => console.log(`Szkolny Alert API: http://127.0.0.1:${process.env.PORT || 3001} • ${store.demo ? 'DEMO — dane przykładowe' : store.storage === 'json' ? 'JSON — dane produkcyjne' : 'PostgreSQL'}`));
+const host = process.env.HOST || '127.0.0.1';
+const server = app.listen(Number(process.env.PORT || 3001), host, () => console.log(`Szkolny Alert API: http://${host}:${process.env.PORT || 3001} • ${store.demo ? 'DEMO — dane przykładowe' : store.storage === 'json' ? 'JSON — dane produkcyjne' : 'PostgreSQL'}`));
 server.on('error', async error => { console.error(error.message); await store.close(); process.exitCode = 1; });
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(async () => { await store.close(); process.exit(); }));

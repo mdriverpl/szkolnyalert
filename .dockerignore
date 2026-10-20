@@ -1,0 +1,17 @@
+# Allow only application sources into the image build context.
+**
+!Dockerfile
+!.dockerignore
+!package.json
+!package-lock.json
+!index.html
+!vite.config.js
+!public/
+!public/**
+!src/
+!src/**
+!server/
+!server/**
+!scripts/
+!scripts/build.js
+**/*.test.js

@@ -4,6 +4,16 @@ import { createServer, loadConfigFromFile } from 'vite';
 import { createApp } from './app.js';
 import { createStore } from './store.js';
 
+test('container proxy configuration trusts private bridge addresses while the native default trusts only loopback', async t => {
+  const store = await createStore({ memory: true }); t.after(() => store.close());
+  const normal = createApp(store).get('trust proxy fn');
+  assert.equal(normal('127.0.0.1'), true);
+  assert.equal(normal('172.20.0.1'), false);
+  const container = createApp(store, { trustProxy: ['loopback', 'linklocal', 'uniquelocal'] }).get('trust proxy fn');
+  assert.equal(container('172.20.0.1'), true);
+  assert.equal(container('8.8.8.8'), false);
+});
+
 test('browser-origin forms pass through the configured Vite proxy; foreign origins stay blocked', async t => {
   const store = await createStore({ memory: true });
   await store.mutate(data => { for (const key of Object.keys(data)) data[key] = []; });

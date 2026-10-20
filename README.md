@@ -8,6 +8,8 @@ Gotowy tryb produkcyjny JSON: `STORAGE_DRIVER=json`, `DEMO_DATA=false`, prywatny
 
 Konfiguracja: [.env.production.example](.env.production.example). Pełna instrukcja wdrożenia, przenoszenia danych i przywracania kopii: [deploy/README.md](deploy/README.md). Dołączone są przykłady systemd i Nginx. PostgreSQL pozostaje opcją po ustawieniu `STORAGE_DRIVER=postgres` oraz `DATABASE_URL`.
 
+GitHub Actions automatycznie testuje aplikację i publikuje obraz `ghcr.io/mdriverpl/szkolnyalert:latest`. Obraz zawiera frontend i backend; dane JSON są przechowywane w trwałym wolumenie. Uruchomienie obrazu przez Compose: [deploy/GHCR.md](deploy/GHCR.md). Publikacja obrazu nie wymaga danych SSH ani osobnego tokenu rejestru.
+
 ## Uruchomienie
 
 Node.js 22.12+ (sprawdzono na 24).
