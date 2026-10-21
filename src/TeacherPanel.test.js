@@ -45,6 +45,8 @@ test('personal panel launches an alert, shows its procedure immediately, and nev
   await waitFor(() => document.querySelector('.teacher-launch-modal input'));
   assert.equal(document.querySelector('.teacher-launch-modal input').required, false);
   assert.equal(document.querySelector('.teacher-launch-modal input').value, '');
+  const smsChoice = document.querySelector('.teacher-launch-modal input[type="checkbox"]');
+  assert.ok(smsChoice); assert.equal(smsChoice.checked, false); assert.equal(smsChoice.disabled, true);
   document.querySelector('.teacher-launch-modal form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await waitFor(() => document.querySelector('.teacher-safety-procedure'));
   assert.match(document.querySelector('.teacher-emergency').textContent, /Nie podano miejsca/);
@@ -56,6 +58,12 @@ test('personal panel launches an alert, shows its procedure immediately, and nev
   assert.ok(teacherCookie, 'saved key restores access after the session cookie is lost');
   document.querySelector('.teacher-install .btn').click(); await nextTick();
   assert.match(document.querySelector('.teacher-install-help').textContent, /iPhone/);
+  window.dispatchEvent(new window.Event('appinstalled')); await nextTick();
+  assert.equal(document.querySelector('.teacher-install'), null, 'installed app hides the large installation block');
+  assert.match(document.querySelector('.teacher-installed-note').textContent, /Aplikacja zainstalowana/);
+  Object.defineProperty(window.navigator, 'standalone', { configurable: true, value: true });
+  app.unmount(); mount(); await waitFor(() => document.querySelector('.teacher-installed-note'));
+  assert.equal(document.querySelector('.teacher-install'), null, 'installed mode stays compact after reopening');
   window.dispatchEvent(new window.Event('offline')); await nextTick();
   assert.equal(document.querySelector('.teacher-alert-button').disabled, true);
   assert.ok(document.querySelector('.teacher-offline'));

@@ -100,3 +100,45 @@ test('partial acceptance and missing recipients are reported accurately', async 
   const noRecipients = await other('/incidents', 'POST', { alertId: 'alert-6', location: 'Sala 2' });
   assert.equal(noRecipients.body.sms.status, 'no_recipients'); assert.equal(calls.length, 1);
 });
+
+test('each alert can skip SMS, request it, or follow school defaults without bypassing disabled sending', async t => {
+  const { client, calls } = await fixture(t); const admin = client(); await login(admin);
+  await admin('/settings/sms', 'PUT', { ...settings, testMode: false });
+  for (const sendSms of ['false', 1, null]) {
+    assert.equal((await admin('/incidents', 'POST', { alertId: 'alert-2', sendSms })).status, 400);
+  }
+  const skipped = await admin('/incidents', 'POST', { alertId: 'alert-2', sendSms: false });
+  assert.equal(skipped.status, 201); assert.equal(skipped.body.sms.status, 'disabled');
+  assert.equal(calls.length, 0);
+  await admin(`/incidents/${skipped.body.id}/resolve`, 'POST');
+  const sent = await admin('/incidents', 'POST', { alertId: 'alert-2', sendSms: true });
+  assert.equal(sent.status, 201); assert.equal(sent.body.sms.accepted, 1);
+  assert.equal(new URLSearchParams(calls[0].options.body).get('to'), '48500600700');
+  await admin(`/incidents/${sent.body.id}/resolve`, 'POST');
+  await admin('/settings/sms', 'PUT', { ...settings, token: '', enabled: false });
+  const disabled = await admin('/incidents', 'POST', { alertId: 'alert-2', sendSms: true });
+  assert.equal(disabled.status, 201); assert.equal(disabled.body.sms.status, 'disabled');
+  assert.equal(calls.length, 1);
+});
+
+test('test alerts retain their marker in history and label actual SMS messages as an exercise', async t => {
+  const { client, calls } = await fixture(t); const admin = client(); await login(admin);
+  const definition = { name: 'Sprawdzenie systemu', description: 'Test powiadomień', severity: 'critical', procedureId: 'procedure-1', isTest: true };
+  assert.equal((await admin('/alerts', 'POST', { ...definition, isTest: 'true' })).status, 400);
+  const created = await admin('/alerts', 'POST', definition);
+  assert.equal(created.status, 201); assert.equal(created.body.isTest, true);
+  await admin('/settings/sms', 'PUT', { ...settings, testMode: false });
+  const incident = await admin('/incidents', 'POST', { alertId: created.body.id, sendSms: true, isTest: false });
+  assert.equal(incident.status, 201); assert.equal(incident.body.isTest, true);
+  assert.equal(incident.body.name, '[TEST] Sprawdzenie systemu');
+  assert.equal(incident.body.sms.status, 'accepted'); assert.equal(calls.length, 1);
+  assert.match(new URLSearchParams(calls[0].options.body).get('message'), /^\[TEST - CWICZENIE\]/);
+  const { isTest, ...withoutMarker } = definition;
+  assert.equal((await admin(`/alerts/${created.body.id}`, 'PUT', withoutMarker)).body.isTest, true);
+  await admin(`/alerts/${created.body.id}`, 'PUT', { ...definition, isTest: false });
+  const state = (await admin('/state')).body;
+  assert.equal(state.incidents.find(x => x.id === incident.body.id).isTest, true, 'editing a definition never relabels history');
+  await admin(`/incidents/${incident.body.id}/resolve`, 'POST');
+  const real = await admin('/incidents', 'POST', { alertId: created.body.id, sendSms: false, isTest: true });
+  assert.equal(real.body.isTest, false); assert.equal(real.body.name, definition.name, 'launch request cannot disguise a real alert as a test');
+});

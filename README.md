@@ -81,6 +81,12 @@ Dane MVP są dokumentem JSONB w tabeli `school_app_state`. Transakcje `SELECT FO
 
 Stare dane bez tablicy `users` są uzupełniane bez usuwania rekordów. W demo konta są przypisywane tylko do znanych szkół `school-demo` i `school-demo-2`. Inne starsze szkoły wymagają przypisania administratora lokalnym narzędziem poniżej; nie są automatycznie udostępniane nowym rejestracjom.
 
+### Superadministrator wszystkich szkół
+
+Ustaw `SUPERADMIN_EMAIL=biuro@mdriver.pl` i własne `SUPERADMIN_PASSWORD` (11–128 znaków) w prywatnym `.env`, a na hostingu w zmiennych środowiskowych aplikacji. Uruchom ponownie serwer. Konto powstanie automatycznie z rolą `superadmin`, niezależną od szkół. Jeśli hasło w środowisku się zmieni, kolejny start serwera zmieni hasło konta i unieważni jego dotychczasowe sesje. Brak zmiennej hasła nie tworzy konta i nie usuwa istniejącego konta. Jeśli wskazany login należy już do konta szkoły, konfiguracja serwera nadaje temu kontu rolę superadministratora, ustawia hasło z env i unieważnia jego wcześniejsze sesje.
+
+Po zalogowaniu superadministrator wybiera szkołę na górnym pasku. Działa wtedy z uprawnieniami administratora tej szkoły, zachowując własną tożsamość; wybór jest zapisany w sesji na serwerze. Konta szkół nie mogą przełączać szkół ani tworzyć superadministratorów przez formularz użytkowników. Przy pustej bazie lista szkół jest pusta do pierwszej rejestracji placówki. Plików `.env` i danych dostępowych nie dodawaj do repozytorium.
+
 ### Konto dla istniejącej szkoły bez administratora
 
 ```powershell
@@ -90,6 +96,10 @@ Remove-Item Env:SCHOOL_ADMIN_PASSWORD
 ```
 
 Wyłącz serwer przed użyciem tego narzędzia z plikiem demo, potem uruchom ponownie. Narzędzie dodaje konto tylko do wskazanej istniejącej szkoły i nie zmienia danych innych szkół. Dla PostgreSQL korzysta z tego samego `.env` co aplikacja.
+
+## Alerty testowe
+
+Przy dodawaniu lub edycji alertu zaznacz **Alert testowy**. Uruchomione zdarzenie otrzyma prefiks `[TEST]`, oznaczenie ćwiczenia w panelach i prefiks `[TEST - CWICZENIE]` w SMS-ach. Pozwala to sprawdzić rzeczywisty przepływ alertów. Znacznik ćwiczenia nie zmienia trybu bramki: przy rzeczywistej wysyłce i zaznaczonym „Wyślij SMS-y do wszystkich” wiadomości zostaną wysłane i rozliczone. Aby sprawdzić panel bez SMS-ów, odznacz wysyłkę lub ustaw testowy tryb bramki. Oznaczenie pozostaje w historii nawet po zmianie definicji alertu. Rzeczywiste aktywne zdarzenia mają pierwszeństwo przed testowymi.
 
 ## Funkcje i weryfikacja
 
@@ -105,7 +115,7 @@ Domyślny tryb testowy Hostava wykonuje **lokalną symulację bez wywołania API
 - Przykładowe procedury: ewakuacja, osoba nieuprawniona w szkole, brak ucznia podczas zajęć, awaria infrastruktury, zgłoszenie przemocy rówieśniczej i komunikat organizacyjny. Dodawane jednorazowo do istniejących i nowo tworzonych szkół, bez nadpisywania ich własnych instrukcji. To szablony do dostosowania i zatwierdzenia przez dyrekcję.
 - Alerty powiązane z procedurą tej samej szkoły.
 - Przykładowe alerty: alarm pożarowy, osoba nieuprawniona, brak ucznia, awaria zasilania, zgłoszenie przemocy i zmiana organizacji zajęć. Każdy ma priorytet i procedurę tej szkoły. Dodawane jednorazowo, bez uruchamiania zdarzeń i nadpisywania własnych alertów.
-- Uruchamianie alertu z lokalizacją, historia i kończenie zdarzeń.
+- Uruchamianie alertu z opcjonalnym miejscem zdarzenia i wyborem „Wyślij SMS-y do wszystkich”, historia i kończenie zdarzeń. Checkbox dotyczy nauczycieli tej szkoły, jest domyślnie zaznaczony przy włączonej bramce i respektuje jej tryb testowy. Odznaczenie uruchamia alert bez SMS-ów; przy wyłączonej bramce opcja jest nieaktywna.
 - Kopia procedury w historii, niezależna od późniejszych edycji.
 - Odświeżanie panelu co 15 sekund i opcjonalna bramka SMSAPI per szkoła. E-mail i push nie są jeszcze podłączone.
 

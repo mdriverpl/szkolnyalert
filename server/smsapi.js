@@ -124,7 +124,7 @@ export function createSmsGateway(store, { encryptionKey, fetchImpl = (...args) =
       if (recipients.numbers.length > 10000) { incident.sms = { status: 'failed', message: 'Przekroczono limit 10 000 odbiorców.' }; return null; }
       const school = data.schools.find(x => x.id === schoolId);
       incident.sms = { status: 'sending', attemptId: id(), total: recipients.numbers.length, omitted: recipients.omitted, at: new Date().toISOString() };
-      const message = `[Szkolny Alert] ${school.name.slice(0, 65)}\n${incident.name.slice(0, 90)}\nMiejsce: ${incident.location.slice(0, 110)}\nProcedura: ${incident.procedure.name.slice(0, 65)}. Sprawdz panel szkoly.`;
+      const message = `${incident.isTest ? '[TEST - CWICZENIE] ' : ''}[Szkolny Alert] ${school.name.slice(0, 65)}\n${incident.name.slice(0, 90)}\nMiejsce: ${incident.location.slice(0, 110)}\nProcedura: ${incident.procedure.name.slice(0, 65)}. Sprawdz panel szkoly.`;
       return { settings, recipients, message, attemptId: incident.sms.attemptId };
     });
     if (!job) return;

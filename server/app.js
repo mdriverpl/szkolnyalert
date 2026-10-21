@@ -43,7 +43,7 @@ function assertUniqueLogin(users, record) {
   const logins = userLogins(record);
   if (users.some(user => user.id !== record.id && userLogins(user).some(login => logins.includes(login)))) throw fail('Ta nazwa użytkownika lub adres e-mail jest już zajęty.', 409);
 }
-const adminOnly = (req, res, next) => req.user.role === 'admin' ? next() : res.status(403).json({ error: 'Ta operacja wymaga uprawnień administratora szkoły.' });
+const adminOnly = (req, res, next) => ['admin', 'superadmin'].includes(req.user.role) && req.schoolId ? next() : res.status(403).json({ error: 'Ta operacja wymaga uprawnień administratora i wybranej szkoły.' });
 function ownRecord(data, collection, recordId, schoolId) {
   const record = data[collection].find(x => x.id === recordId && (collection === 'schools' ? x.id : x.schoolId) === schoolId);
   if (!record) throw fail('Nie znaleziono rekordu.', 404);
@@ -66,9 +66,9 @@ export function createApp(store, options = {}) {
     const token = randomBytes(32).toString('hex');
     await store.mutate(data => {
       const current = data.users.find(x => x.id === user.id && x.schoolId === user.schoolId && (x.authVersion || 0) === (user.authVersion || 0) && x.passwordHash === user.passwordHash);
-      if (!current || !data.schools.some(x => x.id === current.schoolId)) throw fail('Dane konta zostały zmienione. Zaloguj się ponownie.', 401);
+      if (!current || (current.role !== 'superadmin' && !data.schools.some(x => x.id === current.schoolId))) throw fail('Dane konta zostały zmienione. Zaloguj się ponownie.', 401);
       data.sessions = (data.sessions || []).filter(session => session.expires > now && (!old || session.tokenHash !== tokenHash(old)));
-      data.sessions.push({ tokenHash: tokenHash(token), userId: current.id, schoolId: current.schoolId, authVersion: current.authVersion || 0, expires: now + sessionCookie.maxAge });
+      data.sessions.push({ tokenHash: tokenHash(token), userId: current.id, schoolId: current.schoolId, ...(current.role === 'superadmin' ? { selectedSchoolId: data.schools[0]?.id || null } : {}), authVersion: current.authVersion || 0, expires: now + sessionCookie.maxAge });
     });
     res.cookie('session', token, sessionCookie);
   }
@@ -112,7 +112,7 @@ export function createApp(store, options = {}) {
     const login = normalizeLogin(req.body.login || req.body.email);
     const user = data.users.find(x => userLogins(x).includes(login));
     const valid = typeof req.body.password === 'string' && req.body.password.length <= 128 && await verifyPassword(req.body.password, user?.passwordHash || '00000000000000000000000000000000:' + '00'.repeat(64));
-    if (!user || !valid || !data.schools.some(x => x.id === user.schoolId)) throw fail('Niepoprawna nazwa użytkownika lub hasło.', 401);
+    if (!user || !valid || (user.role !== 'superadmin' && !data.schools.some(x => x.id === user.schoolId))) throw fail('Niepoprawna nazwa użytkownika lub hasło.', 401);
     await issueSession(req, res, user); res.json({ user: publicUser(user), demo: store.demo });
   });
   const teacherPanel = createTeacherPanel(store, { secure, rateLimit, launchIncident, vault: sms });
@@ -126,8 +126,20 @@ export function createApp(store, options = {}) {
     const session = data.sessions?.find(x => x.tokenHash === hash);
     if (!session || session.expires <= Date.now()) return reject();
     const user = data.users.find(x => x.id === session.userId && x.schoolId === session.schoolId && (x.authVersion || 0) === session.authVersion);
-    if (!user || !data.schools.some(x => x.id === user.schoolId)) return reject();
-    req.sessionHash = hash; req.user = publicUser(user); req.schoolId = user.schoolId; next();
+    if (!user || (user.role !== 'superadmin' && !data.schools.some(x => x.id === user.schoolId))) return reject();
+    req.sessionHash = hash; req.user = publicUser(user);
+    req.schoolId = user.role === 'superadmin' ? (data.schools.find(x => x.id === session.selectedSchoolId)?.id || data.schools[0]?.id || null) : user.schoolId;
+    next();
+  });
+  app.post('/api/superadmin/school', async (req, res) => {
+    if (req.user.role !== 'superadmin') throw fail('Ta operacja wymaga uprawnień superadministratora.', 403);
+    await store.mutate(data => {
+      if (typeof req.body.schoolId !== 'string' || !data.schools.some(x => x.id === req.body.schoolId)) throw fail('Nie znaleziono szkoły.', 404);
+      const session = data.sessions?.find(x => x.tokenHash === req.sessionHash && x.expires > Date.now());
+      if (!session) throw fail('Zaloguj się ponownie.', 401);
+      session.selectedSchoolId = req.body.schoolId;
+    });
+    res.json({ ok: true });
   });
   app.post('/api/logout', async (req, res) => {
     await store.mutate(data => { data.sessions = (data.sessions || []).filter(x => x.tokenHash !== req.sessionHash); });
@@ -137,8 +149,9 @@ export function createApp(store, options = {}) {
     const data = await store.read();
     const result = { schools: data.schools.filter(x => x.id === req.schoolId) };
     for (const type of ['teachers', 'procedures', 'alerts', 'incidents']) result[type] = data[type].filter(x => x.schoolId === req.schoolId);
-    if (req.user.role === 'admin') result.teachers = result.teachers.map(teacher => ({ ...teacher, hasPanelKey: !!data.teacherKeys?.some(x => x.teacherId === teacher.id && x.schoolId === req.schoolId) }));
-    result.users = req.user.role === 'admin' ? data.users.filter(x => x.schoolId === req.schoolId).map(publicUser) : [];
+    if (['admin', 'superadmin'].includes(req.user.role)) result.teachers = result.teachers.map(teacher => ({ ...teacher, hasPanelKey: !!data.teacherKeys?.some(x => x.teacherId === teacher.id && x.schoolId === req.schoolId) }));
+    result.users = ['admin', 'superadmin'].includes(req.user.role) ? data.users.filter(x => x.schoolId === req.schoolId && x.role !== 'superadmin').map(publicUser) : [];
+    if (req.user.role === 'superadmin') { result.availableSchools = data.schools; result.selectedSchoolId = req.schoolId; }
     const gateway = smsSummary(data.smsSettings?.find(x => x.schoolId === req.schoolId));
     res.json({ ...result, user: req.user, demo: store.demo, loginRequired: true, smsGateway: { provider: gateway.provider, enabled: gateway.enabled && gateway.hasToken, testMode: gateway.testMode } });
   });
@@ -215,6 +228,8 @@ export function createApp(store, options = {}) {
               record.steps = body.steps.map(step => required(step, 'krok procedury', 1000));
             } else {
               if (!['critical', 'warning', 'info'].includes(body.severity)) throw fail('Niepoprawny priorytet.');
+              if (body.isTest !== undefined && typeof body.isTest !== 'boolean') throw fail('Wybierz poprawnie opcję alertu testowego.');
+              record.isTest = body.isTest ?? existing?.isTest ?? false;
               record.severity = body.severity; record.procedureId = required(body.procedureId, 'procedura');
               ownRecord(data, 'procedures', record.procedureId, req.schoolId);
             }
@@ -242,13 +257,16 @@ export function createApp(store, options = {}) {
     });
   }
   async function launchIncident(schoolId, actor, body, waitForSms = true) {
+    if (body.sendSms !== undefined && typeof body.sendSms !== 'boolean') throw fail('Wybierz poprawnie opcję wysyłki SMS.');
     const result = await store.mutate(data => {
       const alert = ownRecord(data, 'alerts', body.alertId, schoolId);
       if (data.incidents.some(x => x.schoolId === schoolId && x.alertId === alert.id && x.status === 'active')) throw fail('Ten alert jest już aktywny.');
       const procedure = ownRecord(data, 'procedures', alert.procedureId, schoolId);
       const incident = { id: id(), alertId: alert.id, schoolId, name: alert.name, severity: alert.severity, location: (body.location === undefined || (typeof body.location === 'string' && body.location.length <= 200 && !body.location.trim())) ? 'Nie podano miejsca' : required(body.location, 'miejsce zdarzenia'), procedure: structuredClone(procedure), status: 'active', createdAt: new Date().toISOString(), createdBy: actor.username, ...(actor.teacherId ? { createdByTeacherId: actor.teacherId } : {}) };
       const gateway = data.smsSettings?.find(x => x.schoolId === schoolId);
-      incident.sms = { status: gateway?.enabled && gateway.encryptedToken ? 'pending' : 'disabled' };
+      incident.isTest = alert.isTest === true;
+      if (incident.isTest) incident.name = `[TEST] ${incident.name}`;
+      incident.sms = { status: body.sendSms !== false && gateway?.enabled && gateway.encryptedToken ? 'pending' : 'disabled', ...(body.sendSms === false ? { message: 'Uruchomiono alert bez wysyłki SMS.' } : {}) };
       data.incidents.unshift(incident); return incident;
     });
     const notification = sms.notifyIncident(schoolId, result.id);

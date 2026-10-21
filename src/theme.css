@@ -1,0 +1,12 @@
+/* Brand palette approved by the project owner. See DESIGN.md. */
+:root {
+  --brand-navy: #142237;
+  --brand-navy-end: #2d3659;
+  --brand-coral: #ffa9b4;
+  --brand-coral-strong: #ff6a77;
+  --brand-text: #d4e2d8;
+  --brand-muted: #a8b8cf;
+  --brand-border: #35445e;
+  --brand-surface: #1d2d46;
+  --brand-gradient: radial-gradient(ellipse at 100% 100%, var(--brand-navy-end) 0, var(--brand-navy) 65%);
+}

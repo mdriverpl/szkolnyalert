@@ -2,8 +2,10 @@ import { existsSync } from 'node:fs';
 import { createStore } from './store.js';
 import { createApp } from './app.js';
 import { storageConfig } from './config.js';
+import { ensureSuperadmin } from './superadmin.js';
 if (existsSync('.env')) process.loadEnvFile('.env');
 const store = await createStore(storageConfig());
+try { await ensureSuperadmin(store); } catch (error) { await store.close(); throw error; }
 const app = createApp(store);
 const host = process.env.HOST || '127.0.0.1';
 const server = app.listen(Number(process.env.PORT || 3001), host, () => console.log(`Szkolny Alert API: http://${host}:${process.env.PORT || 3001} • ${store.demo ? 'DEMO — dane przykładowe' : store.storage === 'json' ? 'JSON — dane produkcyjne' : 'PostgreSQL'}`));

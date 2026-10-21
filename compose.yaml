@@ -14,6 +14,8 @@ services:
       JSON_FILE: app.json
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:?Ustaw publiczny adres HTTPS w pliku env}
       SMS_ENCRYPTION_KEY: ${SMS_ENCRYPTION_KEY:?Ustaw trwały klucz szyfrowania w pliku env}
+      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-biuro@mdriver.pl}
+      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-}
       HOSTAVA_SMS_KEY: ${HOSTAVA_SMS_KEY:-}
       JSON_BACKUP_INTERVAL_MINUTES: ${JSON_BACKUP_INTERVAL_MINUTES:-60}
       JSON_BACKUP_LIMIT: ${JSON_BACKUP_LIMIT:-48}

@@ -95,7 +95,7 @@
   --danger: #cf233c;
 }
 .sidebar { background: #142237; }
-.brand-icon { color: #ff6a77; }
+.brand-icon { color: var(--brand-coral-strong); }
 .brand-light { color: #d9e1f0; }
 .brand small { color: #8b9cb7; }
 .workspace-label { color: #7f90ac; }
@@ -224,8 +224,8 @@ th { background: #f9fbfe; color: #8493a9; }
 td { color: #7587a1; }
 .person-cell { color: #344b69; }
 .avatar { background: #e7edf8; color: #728aaa; }
-.login-story { background: radial-gradient(ellipse at 100% 100%, #2d3659 0, #142237 65%); }
-.login-story em { color: #ffa9b4; }
+.login-story { background: var(--brand-gradient); }
+.login-story em { color: var(--brand-coral); }
 .login-story .eyebrow, .login-seal { color: #e5a9b4; }
 footer { color: #929eb0; }
 @media (min-width: 1500px) {
@@ -274,3 +274,7 @@ footer { color: #929eb0; }
   .recent-event > svg { display: none; }
   .active-banner span { font-size: 9px; line-height: 1.6; }
 }
+.superadmin-school-switch { display: block; min-width: 0; margin: 0; }
+.superadmin-school-switch select { max-width: min(420px, 50vw); padding: 8px 28px 8px 10px; font-size: 12px; }
+.test-alert-badge { display: inline-flex; background: #f8ecd5; color: #916c29; margin: 8px 0; }
+.test-alert-notice { padding: 12px 15px; border: 1px solid #ebd8ad; border-radius: 8px; background: #fcf6e9; color: #8b692f; font-size: 11px; line-height: 1.8; margin-bottom: 16px; }
