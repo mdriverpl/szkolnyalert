@@ -278,3 +278,8 @@ footer { color: #929eb0; }
 .superadmin-school-switch select { max-width: min(420px, 50vw); padding: 8px 28px 8px 10px; font-size: 12px; }
 .test-alert-badge { display: inline-flex; background: #f8ecd5; color: #916c29; margin: 8px 0; }
 .test-alert-notice { padding: 12px 15px; border: 1px solid #ebd8ad; border-radius: 8px; background: #fcf6e9; color: #8b692f; font-size: 11px; line-height: 1.8; margin-bottom: 16px; }
+
+.global-help-link{position:fixed;right:max(18px,env(safe-area-inset-right));bottom:calc(18px + env(safe-area-inset-bottom));z-index:85;display:flex;align-items:center;justify-content:center;width:44px;height:44px;border:1px solid var(--brand-border);border-radius:50%;background:var(--brand-navy);color:var(--brand-coral);box-shadow:0 4px 16px #14223726;text-decoration:none;transition:background .15s}
+.global-help-link:hover{background:var(--brand-navy-end)}
+.global-help-link:focus-visible{outline:3px solid var(--brand-coral-strong);outline-offset:4px}
+@media print{.global-help-link{display:none}}
