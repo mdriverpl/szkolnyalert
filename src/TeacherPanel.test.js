@@ -6,17 +6,29 @@ import { Window } from 'happy-dom';
 import { parse, compileScript } from '@vue/compiler-sfc';
 import { createApp as createApi } from '../server/app.js';
 import { createStore } from '../server/store.js';
+import webpush from 'web-push';
 
 test('personal panel launches an alert, shows its procedure immediately, and never reports offline data as current', async t => {
   const store = await createStore({ memory: true });
   await store.mutate(data => { data.incidents = [{ id: 'foreign-event', schoolId: 'school-demo-2', status: 'active', name: 'Foreign event', location: 'Foreign location', severity: 'critical', createdAt: new Date().toISOString(), procedure: data.procedures.find(x => x.id === 'procedure-6') }]; });
-  const server = createApi(store).listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
+  const vapid = webpush.generateVAPIDKeys(), pushCalls = [];
+  const server = createApi(store, { push: { ...vapid, sendImpl: async (subscription, payload) => { pushCalls.push(JSON.parse(payload)); } } }).listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`, originalFetch = globalThis.fetch;
   const login = await originalFetch(base + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: 'admin@szkolnyalert.pl', password: 'demo12345' }) });
   const adminCookie = login.headers.get('set-cookie').split(';')[0];
   const admin = (path, method = 'POST') => originalFetch(base + '/api' + path, { method, headers: { Cookie: adminCookie, 'Content-Type': 'application/json' } });
   const access = await (await admin('/teachers/teacher-1/panel-key')).json();
   const window = new Window({ url: base + access.path });
+  let deviceSubscription = null, permissionCalls = 0;
+  const subscriptionData = { endpoint: 'https://fcm.googleapis.com/push/test-phone', keys: { p256dh: vapid.publicKey, auth: Buffer.alloc(16, 1).toString('base64url') } };
+  Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
+  window.PushManager = function () {};
+  window.Notification = { permission: 'default', requestPermission: async () => { permissionCalls++; window.Notification.permission = 'granted'; return 'granted'; } };
+  const registration = { active: {}, pushManager: { getSubscription: async () => deviceSubscription, subscribe: async () => {
+    deviceSubscription = { ...subscriptionData, options: { applicationServerKey: Buffer.from(vapid.publicKey, 'base64url') }, toJSON: () => subscriptionData, unsubscribe: async () => { deviceSubscription = null; return true; } };
+    return deviceSubscription;
+  } } };
+  Object.defineProperty(window.navigator, 'serviceWorker', { configurable: true, value: { getRegistration: async () => registration, addEventListener() {}, removeEventListener() {} } });
   let app, teacherCookie = '';
   for (const key of ['window', 'document', 'navigator', 'Document', 'ShadowRoot', 'Element', 'HTMLElement', 'SVGElement', 'Node']) Object.defineProperty(globalThis, key, { configurable: true, value: key === 'window' ? window : window[key] });
   globalThis.fetch = async (path, options = {}) => {
@@ -38,7 +50,15 @@ test('personal panel launches an alert, shows its procedure immediately, and nev
   mount(); await waitFor(() => document.querySelector('.teacher-calm'));
   assert.equal(window.location.hash, '', 'access key is removed from the visible URL');
   assert.equal(window.localStorage.getItem('szkolnyalert.teacherKey'), access.key);
-  assert.equal(document.querySelector('.teacher-main > .teacher-install')?.nextElementSibling?.className, 'teacher-identity', 'installation appears at the top of the panel');
+  assert.equal(document.querySelector('.teacher-main > .teacher-install')?.nextElementSibling?.className, 'teacher-push panel', 'installation and push controls appear at the top of the panel');
+  const button = text => [...document.querySelectorAll('button')].find(x => x.textContent.includes(text));
+  await waitFor(() => button('Włącz powiadomienia'));
+  assert.equal(permissionCalls, 0, 'permission is never requested without a tap');
+  button('Włącz powiadomienia').click(); await waitFor(() => button('Wyślij test na ten telefon'));
+  assert.equal(permissionCalls, 1);
+  assert.equal((await store.read()).pushSubscriptions.length, 1);
+  button('Wyślij test na ten telefon').click(); await waitFor(() => pushCalls.length === 1);
+  assert.match(pushCalls[0].title, /test powiadomień/);
   assert.match(document.querySelector('.teacher-identity').textContent, /Anna Kowalska/);
   assert.equal(document.body.textContent.includes('Foreign location'), false);
   document.querySelector('.teacher-alert-button').click();
@@ -54,6 +74,9 @@ test('personal panel launches an alert, shows its procedure immediately, and nev
   assert.equal(document.querySelector('.teacher-launch-modal'), null);
   const event = (await store.read()).incidents.find(x => x.schoolId === 'school-demo' && x.status === 'active');
   assert.equal(event.createdByTeacherId, 'teacher-1');
+  await waitFor(() => pushCalls.length === 2);
+  assert.equal(pushCalls[1].body, 'Nowy alert w szkole — otwórz aplikację.');
+  assert.equal(JSON.stringify(pushCalls[1]).includes('Anna'), false);
   app.unmount(); teacherCookie = ''; mount(); await waitFor(() => document.querySelector('.teacher-safety-procedure'));
   assert.ok(teacherCookie, 'saved key restores access after the session cookie is lost');
   document.querySelector('.teacher-install .btn').click(); await nextTick();
@@ -86,6 +109,7 @@ test('personal panel launches an alert, shows its procedure immediately, and nev
   assert.equal(window.localStorage.getItem('szkolnyalert.teacherKey'), replacement.key, 'manually entered keys are remembered');
   document.querySelector('.teacher-logout').click(); await waitFor(() => document.querySelector('.teacher-access'));
   assert.equal(window.localStorage.getItem('szkolnyalert.teacherKey'), null, 'logout forgets the key');
+  assert.equal((await store.read()).pushSubscriptions.length, 0, 'logout removes this device subscription');
   app.unmount(); mount(); await waitFor(() => document.querySelector('.teacher-access'));
   assert.equal(document.querySelector('.teacher-identity'), null, 'logout stays effective after reopening');
 });

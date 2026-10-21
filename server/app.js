@@ -8,6 +8,7 @@ import { previewTeacherCsv } from './teacher-csv.js';
 import { createSmsGateway, smsSummary } from './smsapi.js';
 import { createTeacherPanel } from './teacher-panel.js';
 import { createTeacherLinkSms } from './teacher-link-sms.js';
+import { createPushGateway } from './push.js';
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const required = (value, label, max = 200) => {
@@ -53,6 +54,7 @@ function ownRecord(data, collection, recordId, schoolId) {
 export function createApp(store, options = {}) {
   const app = express(), attempts = new Map();
   const sms = createSmsGateway(store, options.sms);
+  const push = createPushGateway(store, options.push);
   const secure = process.env.NODE_ENV === 'production';
   const sessionCookie = { httpOnly: true, sameSite: 'strict', secure, maxAge: 8 * 60 * 60_000, path: '/' };
   const tokenHash = token => createHash('sha256').update(token).digest('hex');
@@ -115,7 +117,7 @@ export function createApp(store, options = {}) {
     if (!user || !valid || (user.role !== 'superadmin' && !data.schools.some(x => x.id === user.schoolId))) throw fail('Niepoprawna nazwa użytkownika lub hasło.', 401);
     await issueSession(req, res, user); res.json({ user: publicUser(user), demo: store.demo });
   });
-  const teacherPanel = createTeacherPanel(store, { secure, rateLimit, launchIncident, vault: sms });
+  const teacherPanel = createTeacherPanel(store, { secure, rateLimit, launchIncident, vault: sms, push });
   app.use('/api/teacher-panel', teacherPanel.router);
   app.use('/api', async (req, res, next) => {
     const token = readToken(req);
@@ -252,6 +254,7 @@ export function createApp(store, options = {}) {
         if (collection === 'teachers') {
           data.teacherKeys = (data.teacherKeys || []).filter(x => x.teacherId !== record.id);
           data.teacherSessions = (data.teacherSessions || []).filter(x => x.teacherId !== record.id);
+          data.pushSubscriptions = (data.pushSubscriptions || []).filter(x => x.teacherId !== record.id);
         }
       }); res.json({ ok: true });
     });
@@ -269,7 +272,7 @@ export function createApp(store, options = {}) {
       incident.sms = { status: body.sendSms !== false && gateway?.enabled && gateway.encryptedToken ? 'pending' : 'disabled', ...(body.sendSms === false ? { message: 'Uruchomiono alert bez wysyłki SMS.' } : {}) };
       data.incidents.unshift(incident); return incident;
     });
-    const notification = sms.notifyIncident(schoolId, result.id);
+    const notification = Promise.all([sms.notifyIncident(schoolId, result.id), push.notifyIncident(schoolId, result.id)]);
     if (waitForSms) await notification;
     else notification.catch(() => console.error('Nie udało się zapisać wyniku wysyłki SMS. Sprawdź historię zdarzenia.'));
     return (await store.read()).incidents.find(x => x.id === result.id && x.schoolId === schoolId);

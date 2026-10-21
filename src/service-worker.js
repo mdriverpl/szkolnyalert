@@ -1,5 +1,23 @@
 const CACHE = 'szkolny-alert-__BUILD_ID__';
 const PRECACHE = __PRECACHE__;
+self.addEventListener('push', event => {
+  let payload = {};
+  try { payload = event.data?.json() || {}; } catch { /* Always show a visible notification. */ }
+  event.waitUntil(self.registration.showNotification(payload.title || 'Szkolny Alert', {
+    body: payload.body || 'Nowy alert w szkole — otwórz aplikację.',
+    icon: '/icon-192.png', badge: '/icon-192.png', tag: payload.tag || 'szkolnyalert',
+    data: { url: '/nauczyciel' }, requireInteraction: true
+  }));
+});
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const existing = windows.find(client => new URL(client.url).origin === self.location.origin && new URL(client.url).pathname.startsWith('/nauczyciel'));
+    if (existing) { await existing.focus(); existing.postMessage({ type: 'refresh-alerts' }); }
+    else await self.clients.openWindow('/nauczyciel');
+  })());
+});
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(PRECACHE)).then(() => self.skipWaiting()));
 });

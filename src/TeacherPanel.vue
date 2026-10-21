@@ -1,11 +1,70 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { ShieldCheck, ShieldAlert, Radio, MapPin, Clock3, Download, WifiOff, CheckCircle2, X, ArrowRight, LogOut, KeyRound, LoaderCircle } from 'lucide-vue-next';
+import { ShieldCheck, ShieldAlert, Radio, MapPin, Clock3, Download, WifiOff, CheckCircle2, X, ArrowRight, LogOut, KeyRound, LoaderCircle, Bell } from 'lucide-vue-next';
 
 const data = ref(null), loading = ref(true), connected = ref(false), needsKey = ref(false), error = ref(''), accessKey = ref('');
 const launchOpen = ref(false), selectedAlert = ref(''), location = ref(''), sending = ref(false), launchError = ref('');
 const sendSms = ref(false);
 const installHelp = ref(false), installPrompt = ref(null), standalone = ref(false);
+const pushStatus = ref('checking'), pushBusy = ref(false), pushMessage = ref('');
+let pushRegistration, pushSubscription, pushPublicKey;
+const pushSupported = () => window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+function pushKeyBytes(value) {
+  const binary = window.atob(value.replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(binary, char => char.charCodeAt(0));
+}
+async function loadPush() {
+  if (!pushSupported()) { pushStatus.value = 'unsupported'; return; }
+  try {
+    const config = await api('/push');
+    if (!config.enabled) { pushStatus.value = 'unconfigured'; return; }
+    pushPublicKey = config.publicKey;
+    // Do not request permission on load; permission is requested only on a tap.
+    pushRegistration = await navigator.serviceWorker.getRegistration('/');
+    if (!pushRegistration?.active) { pushStatus.value = 'loading-worker'; return; }
+    pushSubscription = await pushRegistration.pushManager.getSubscription();
+    if (window.Notification.permission === 'denied') { pushStatus.value = 'denied'; return; }
+    if (pushSubscription && window.Notification.permission === 'granted') {
+      const currentKey = pushSubscription.options?.applicationServerKey;
+      if (currentKey && String(new Uint8Array(currentKey)) !== String(pushKeyBytes(pushPublicKey))) {
+        await pushSubscription.unsubscribe(); pushSubscription = null;
+      } else {
+        await api('/push', { method: 'POST', body: JSON.stringify(pushSubscription) });
+        pushStatus.value = 'subscribed'; return;
+      }
+    }
+    pushStatus.value = 'ready';
+  } catch { pushStatus.value = 'error'; pushMessage.value = 'Nie udało się sprawdzić powiadomień. Spróbuj ponownie.'; }
+}
+async function enablePush() {
+  if (pushBusy.value || !pushRegistration || !pushPublicKey) return;
+  pushBusy.value = true; pushMessage.value = '';
+  try {
+    const permission = await window.Notification.requestPermission();
+    if (permission !== 'granted') { pushStatus.value = permission === 'denied' ? 'denied' : 'ready'; return; }
+    pushSubscription = await pushRegistration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: pushKeyBytes(pushPublicKey) });
+    await api('/push', { method: 'POST', body: JSON.stringify(pushSubscription) });
+    pushStatus.value = 'subscribed'; pushMessage.value = 'Powiadomienia włączone na tym urządzeniu.';
+  } catch { pushStatus.value = 'ready'; pushMessage.value = 'Nie udało się włączyć powiadomień. Sprawdź zgodę w ustawieniach telefonu i spróbuj ponownie.'; }
+  finally { pushBusy.value = false; }
+}
+async function disablePush() {
+  if (!pushSubscription) return;
+  pushBusy.value = true; pushMessage.value = '';
+  try {
+    await api('/push', { method: 'DELETE', body: JSON.stringify({ endpoint: pushSubscription.endpoint }) });
+    await pushSubscription.unsubscribe(); pushSubscription = null; pushStatus.value = 'ready';
+  } catch { pushMessage.value = 'Nie udało się wyłączyć powiadomień. Spróbuj ponownie.'; }
+  finally { pushBusy.value = false; }
+}
+async function testPush() {
+  if (!pushSubscription || pushBusy.value) return;
+  pushBusy.value = true;
+  try { const result = await api('/push/test', { method: 'POST', body: JSON.stringify({ endpoint: pushSubscription.endpoint }) }); pushMessage.value = result.message; }
+  catch (e) { pushMessage.value = e.message; }
+  finally { pushBusy.value = false; }
+}
+function pushWorkerMessage(event) { if (event.data?.type === 'refresh-alerts' && data.value) refresh(); }
 const launchDialog = ref(null);
 let previousFocus;
 watch(launchOpen, async open => {
@@ -61,6 +120,7 @@ async function initialize() {
       accessKey.value = ''; needsKey.value = false;
     }
     await refresh();
+    if (data.value) await loadPush();
   } catch (e) { error.value = e.status ? e.message : 'Brak połączenia. Spróbuj ponownie po odzyskaniu internetu.'; connected.value = false; }
   finally { loading.value = false; }
 }
@@ -81,7 +141,7 @@ async function launch() {
 }
 async function logout() {
   rememberKey('');
-  try { await api('/logout', { method: 'POST' }); data.value = null; needsKey.value = true; connected.value = false; }
+  try { await api('/logout', { method: 'POST', body: JSON.stringify({ endpoint: pushSubscription?.endpoint }) }); await pushSubscription?.unsubscribe().catch(() => {}); pushSubscription = null; pushStatus.value = 'ready'; data.value = null; needsKey.value = true; connected.value = false; }
   catch (e) { error.value = e.message; }
 }
 function captureInstall(event) { event.preventDefault(); installPrompt.value = event; }
@@ -105,6 +165,7 @@ function escape(event) {
   }
 }
 onMounted(() => {
+  navigator.serviceWorker?.addEventListener('message', pushWorkerMessage);
   standalone.value = window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
   initialize();
   interval = setInterval(() => { if (data.value && !needsKey.value && document.visibilityState !== 'hidden') refresh(); }, 3000);
@@ -113,6 +174,7 @@ onMounted(() => {
   window.addEventListener('appinstalled', installed); window.addEventListener('keydown', escape);
 });
 onUnmounted(() => {
+  navigator.serviceWorker?.removeEventListener('message', pushWorkerMessage);
   clearInterval(interval); requestVersion++;
   window.removeEventListener('online', resume); window.removeEventListener('offline', offline); document.removeEventListener('visibilitychange', resume);
   window.removeEventListener('beforeinstallprompt', captureInstall); window.removeEventListener('appinstalled', installed); window.removeEventListener('keydown', escape);
@@ -128,6 +190,7 @@ onUnmounted(() => {
       <template v-else>
         <p v-if="standalone" class="teacher-installed-note"><CheckCircle2 :size="14"/>Aplikacja zainstalowana</p>
         <section v-else class="teacher-install"><div><Download :size="22"/><span><strong>Miej swój panel zawsze pod ręką</strong><small>Klucz zapamiętujemy na tym urządzeniu. Twój link jest osobisty — nie przekazuj go innym.</small></span></div><button class="btn secondary" @click="install">Zainstaluj aplikację</button><div v-if="installHelp" class="teacher-install-help"><p><strong>Android:</strong> w menu przeglądarki wybierz „Zainstaluj aplikację” lub „Dodaj do ekranu głównego”.</p><p><strong>iPhone:</strong> otwórz link w Safari → Udostępnij → Do ekranu początkowego.</p><p>Instalacja na telefonie wymaga udostępnienia aplikacji przez HTTPS.</p></div></section>
+        <section class="teacher-push panel" aria-label="Powiadomienia telefonu"><div class="teacher-push-heading"><Bell :size="21"/><div><strong>{{ pushStatus === 'subscribed' ? 'Powiadomienia włączone' : 'Powiadomienia na telefonie' }}</strong><p>Ogólny komunikat o alercie, także przy zamkniętej aplikacji. Szczegóły zobaczysz po jej otwarciu.</p></div></div><button v-if="pushStatus === 'ready'" class="btn primary" :disabled="pushBusy || !connected" @click="enablePush">Włącz powiadomienia</button><template v-if="pushStatus === 'subscribed'"><button class="btn secondary" :disabled="pushBusy || !connected" @click="testPush">Wyślij test na ten telefon</button><button class="text-link" :disabled="pushBusy" @click="disablePush">Wyłącz powiadomienia</button></template><p v-if="pushStatus === 'denied'" class="teacher-push-help">Powiadomienia są zablokowane. Włącz je w ustawieniach telefonu lub przeglądarki dla Szkolnego Alertu, a potem otwórz aplikację ponownie.</p><p v-if="pushStatus === 'unsupported'" class="teacher-push-help">Na iPhonie otwórz aplikację z ikony na ekranie głównym (iOS 16.4 lub nowszy). Na Androidzie użyj aktualnej przeglądarki Chrome. Wymagane jest HTTPS.</p><p v-if="pushStatus === 'unconfigured'" class="teacher-push-help">Administrator musi skonfigurować powiadomienia na serwerze.</p><button v-if="['loading-worker', 'error'].includes(pushStatus)" class="text-link" :disabled="pushBusy" @click="loadPush">Sprawdź gotowość powiadomień</button><p v-if="pushStatus === 'loading-worker'" class="teacher-push-help">Trwa przygotowanie aplikacji. Odśwież ją lub sprawdź gotowość ponownie.</p><p v-if="pushMessage" class="teacher-push-help" role="status">{{ pushMessage }}</p></section>
         <section class="teacher-identity"><span class="eyebrow">{{ data.school.name }}</span><h1>{{ data.teacher.name }}</h1><p>{{ data.teacher.subject }}</p><div class="teacher-connection"><span :class="['status-dot', { orange: !connected }]"></span>{{ connected ? 'Połączono ze szkołą' : 'Brak aktualnego połączenia' }}<span v-if="data.checkedAt">· {{ date(data.checkedAt) }}</span></div></section>
         <div v-if="!connected" class="teacher-offline" role="alert"><WifiOff :size="22"/><div><strong>Dane mogą być nieaktualne</strong><p>{{ error }}</p><button class="text-link" @click="refresh">Sprawdź połączenie</button></div></div>
         <div v-if="active.length" class="teacher-alerts">

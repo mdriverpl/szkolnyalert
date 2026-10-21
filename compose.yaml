@@ -14,6 +14,9 @@ services:
       JSON_FILE: app.json
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:?Ustaw publiczny adres HTTPS w pliku env}
       SMS_ENCRYPTION_KEY: ${SMS_ENCRYPTION_KEY:?Ustaw trwały klucz szyfrowania w pliku env}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:biuro@mdriver.pl}
       SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-biuro@mdriver.pl}
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-}
       HOSTAVA_SMS_KEY: ${HOSTAVA_SMS_KEY:-}

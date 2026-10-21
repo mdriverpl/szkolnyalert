@@ -10,7 +10,7 @@ const ownTeacher = (data, teacherId, schoolId) => {
   return teacher;
 };
 
-export function createTeacherPanel(store, { secure, rateLimit, launchIncident, vault }) {
+export function createTeacherPanel(store, { secure, rateLimit, launchIncident, vault, push }) {
   async function prepareKey(schoolId) {
     const key = randomBytes(32).toString('hex');
     return { keyHash: hash(key), encryptedKey: await vault.sealAccessKey(key, `teacher-panel:${schoolId}`), createdAt: new Date().toISOString() };
@@ -51,7 +51,7 @@ export function createTeacherPanel(store, { secure, rateLimit, launchIncident, v
     if (!access || !data.schools.some(x => x.id === session.schoolId)) throw fail('Dostęp wygasł lub został unieważniony. Otwórz aktualny link od szkoły.', 401);
     const teacher = data.teachers.find(x => x.id === session.teacherId && x.schoolId === session.schoolId);
     if (!teacher) throw fail('Dostęp nauczyciela został unieważniony.', 401);
-    req.panelTeacher = teacher; req.panelSchoolId = session.schoolId; req.panelTokenHash = session.tokenHash; next();
+    req.panelTeacher = teacher; req.panelSchoolId = session.schoolId; req.panelTokenHash = session.tokenHash; req.panelKeyHash = session.keyHash; next();
   });
   router.get('/state', async (req, res) => {
     const data = await store.read(), schoolId = req.panelSchoolId;
@@ -65,7 +65,18 @@ export function createTeacherPanel(store, { secure, rateLimit, launchIncident, v
     const incident = await launchIncident(req.panelSchoolId, { username: req.panelTeacher.name, teacherId: req.panelTeacher.id }, req.body, false);
     res.status(201).json(incident);
   });
+  router.get('/push', (req, res) => res.json(push.config()));
+  router.post('/push', async (req, res) => {
+    rateLimit(req, 'push-subscribe', 120);
+    res.json(await push.subscribe(req.panelTeacher, req.panelKeyHash, req.body));
+  });
+  router.delete('/push', async (req, res) => res.json(await push.unsubscribe(req.panelTeacher, req.body.endpoint)));
+  router.post('/push/test', async (req, res) => {
+    rateLimit(req, 'push-test');
+    res.json(await push.test(req.panelTeacher, req.panelKeyHash, req.body.endpoint));
+  });
   router.post('/logout', async (req, res) => {
+    if (req.body?.endpoint) await push.unsubscribe(req.panelTeacher, req.body.endpoint);
     await store.mutate(data => { data.teacherSessions = (data.teacherSessions || []).filter(x => x.tokenHash !== req.panelTokenHash); });
     res.clearCookie('teacher_session', { path: cookieOptions.path }); res.json({ ok: true });
   });
@@ -79,6 +90,7 @@ export function createTeacherPanel(store, { secure, rateLimit, launchIncident, v
       data.teacherKeys = (data.teacherKeys || []).filter(x => x.teacherId !== req.params.id);
       attachKey(data, { id: req.params.id, schoolId: req.schoolId }, access);
       data.teacherSessions = (data.teacherSessions || []).filter(x => x.teacherId !== req.params.id);
+      data.pushSubscriptions = (data.pushSubscriptions || []).filter(x => x.teacherId !== req.params.id);
     });
     res.json({ key, path: `/nauczyciel#klucz=${key}` });
   }
@@ -87,6 +99,7 @@ export function createTeacherPanel(store, { secure, rateLimit, launchIncident, v
       ownTeacher(data, req.params.id, req.schoolId);
       data.teacherKeys = (data.teacherKeys || []).filter(x => x.teacherId !== req.params.id);
       data.teacherSessions = (data.teacherSessions || []).filter(x => x.teacherId !== req.params.id);
+      data.pushSubscriptions = (data.pushSubscriptions || []).filter(x => x.teacherId !== req.params.id);
     });
     res.json({ ok: true });
   }
