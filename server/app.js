@@ -140,7 +140,7 @@ export function createApp(store, options = {}) {
     if (req.user.role === 'admin') result.teachers = result.teachers.map(teacher => ({ ...teacher, hasPanelKey: !!data.teacherKeys?.some(x => x.teacherId === teacher.id && x.schoolId === req.schoolId) }));
     result.users = req.user.role === 'admin' ? data.users.filter(x => x.schoolId === req.schoolId).map(publicUser) : [];
     const gateway = smsSummary(data.smsSettings?.find(x => x.schoolId === req.schoolId));
-    res.json({ ...result, user: req.user, demo: store.demo, loginRequired: true, smsGateway: { enabled: gateway.enabled && gateway.hasToken, testMode: gateway.testMode } });
+    res.json({ ...result, user: req.user, demo: store.demo, loginRequired: true, smsGateway: { provider: gateway.provider, enabled: gateway.enabled && gateway.hasToken, testMode: gateway.testMode } });
   });
   app.get('/api/settings/sms', adminOnly, async (req, res) => res.json(await sms.getSettings(req.schoolId)));
   app.put('/api/settings/sms', adminOnly, async (req, res) => res.json(await sms.saveSettings(req.schoolId, req.body)));
@@ -148,7 +148,7 @@ export function createApp(store, options = {}) {
   app.post('/api/settings/sms/test', adminOnly, async (req, res) => { rateLimit(req, 'sms-test'); res.json(await sms.test(req.schoolId, req.body.phone)); });
   app.post('/api/schools', adminOnly, (_, res) => res.status(403).json({ error: 'Konto jest przypisane do jednej szkoły. Nową szkołę dodaj na ekranie startowym z osobnym kontem administratora.' }));
   const teacherLinkSms = createTeacherLinkSms(store, sms);
-  app.post('/api/teachers/link-sms/preview', adminOnly, async (req, res) => res.json(await teacherLinkSms.preview(req.schoolId, req.user.id, `${req.protocol}://${req.get('host')}`)));
+  app.post('/api/teachers/link-sms/preview', adminOnly, async (req, res) => res.json(await teacherLinkSms.preview(req.schoolId, req.user.id, `${req.protocol}://${req.get('host')}`, req.body?.teacherId ?? null)));
   app.post('/api/teachers/link-sms/send', adminOnly, async (req, res) => res.json(await teacherLinkSms.send(req.schoolId, req.user.id, `${req.protocol}://${req.get('host')}`, req.body)));
   app.post('/api/teachers/:id/panel-key', adminOnly, teacherPanel.generate);
   app.get('/api/teachers/:id/panel-key', adminOnly, teacherPanel.retrieve);
@@ -246,7 +246,7 @@ export function createApp(store, options = {}) {
       const alert = ownRecord(data, 'alerts', body.alertId, schoolId);
       if (data.incidents.some(x => x.schoolId === schoolId && x.alertId === alert.id && x.status === 'active')) throw fail('Ten alert jest już aktywny.');
       const procedure = ownRecord(data, 'procedures', alert.procedureId, schoolId);
-      const incident = { id: id(), alertId: alert.id, schoolId, name: alert.name, severity: alert.severity, location: required(body.location, 'miejsce zdarzenia'), procedure: structuredClone(procedure), status: 'active', createdAt: new Date().toISOString(), createdBy: actor.username, ...(actor.teacherId ? { createdByTeacherId: actor.teacherId } : {}) };
+      const incident = { id: id(), alertId: alert.id, schoolId, name: alert.name, severity: alert.severity, location: (body.location === undefined || (typeof body.location === 'string' && body.location.length <= 200 && !body.location.trim())) ? 'Nie podano miejsca' : required(body.location, 'miejsce zdarzenia'), procedure: structuredClone(procedure), status: 'active', createdAt: new Date().toISOString(), createdBy: actor.username, ...(actor.teacherId ? { createdByTeacherId: actor.teacherId } : {}) };
       const gateway = data.smsSettings?.find(x => x.schoolId === schoolId);
       incident.sms = { status: gateway?.enabled && gateway.encryptedToken ? 'pending' : 'disabled' };
       data.incidents.unshift(incident); return incident;

@@ -93,6 +93,14 @@ Wyłącz serwer przed użyciem tego narzędzia z plikiem demo, potem uruchom pon
 
 ## Funkcje i weryfikacja
 
+### SMS przez Hostava
+
+W **Ustawieniach → Operator SMS** wybierz **Hostava**, wpisz klucz API i zapisz ustawienia szkoły. Alternatywnie ustaw `HOSTAVA_SMS_KEY` w środowisku serwera (również w pliku env używanym przez Docker Compose), pozostaw pole klucza puste i zapisz ustawienia. Klucz zostanie zaszyfrowany i przypisany do tej szkoły. Istniejąca konfiguracja SMSAPI nadal działa; zmiana operatora wymaga osobnego klucza. Zmiana zmiennej środowiskowej nie zastępuje już zapisanego klucza — nowy klucz wpisz w ustawieniach.
+
+Hostava obsługuje automatyczne SMS-y przy alertach oraz wysyłkę osobistych linków nauczycieli. Każdy numer otrzymuje osobny `POST https://cloud.hostava.pl/v1/messages` z JSON `{ "to": "+48…", "text": "…" }`, autoryzacją Bearer i nagłówkiem `Idempotency-Key`. Klucz to SHA-256 tablicy JSON `[numer w formacie międzynarodowym, dokładna treść, dzień w Europe/Warsaw]`. Ten sam numer i treść tego samego dnia dają ten sam klucz, także po restarcie. Zmiana dnia, numeru lub treści daje nowy klucz; identyczne alerty tego samego dnia będą deduplikowane przez operatora. Wysyłka nie jest automatycznie ponawiana.
+
+Domyślny tryb testowy Hostava wykonuje **lokalną symulację bez wywołania API**, kosztów, sprawdzenia klucza lub salda. Aby sprawdzić rzeczywistą wysyłkę, wyłącz tryb testowy, zapisz ustawienia i wyślij płatny SMS testowy. Odpowiedź `202` z `id` i statusem `QUEUED` oznacza przyjęcie do kolejki, nie doręczenie. Błędy sieci, niepoprawne odpowiedzi i błędy serwera operatora są zapisywane jako nieznany wynik. Wyniki są widoczne w historii zdarzeń; odpowiedzi zawierające sekrety nie trafiają do interfejsu.
+
 - Szkoła, katalog nauczycieli, konta użytkowników i role.
 - Przykładowe procedury: ewakuacja, osoba nieuprawniona w szkole, brak ucznia podczas zajęć, awaria infrastruktury, zgłoszenie przemocy rówieśniczej i komunikat organizacyjny. Dodawane jednorazowo do istniejących i nowo tworzonych szkół, bez nadpisywania ich własnych instrukcji. To szablony do dostosowania i zatwierdzenia przez dyrekcję.
 - Alerty powiązane z procedurą tej samej szkoły.
@@ -117,10 +125,12 @@ Interfejs działa w przeglądarce mobilnej. Po udostępnieniu przez HTTPS można
 
 ### Osobisty panel nauczyciela
 
+W katalogu **Nauczyciele** administrator może kliknąć ikonę wiadomości przy wybranej osobie (**Wyślij SMS z linkiem**). Okno pokazuje nazwisko, numer telefonu i tryb bramki; dopiero potwierdzenie uruchamia wysyłkę do tej jednej osoby. Wymagany jest poprawny numer, nieprzypisany innemu nauczycielowi tej szkoły, oraz skonfigurowana bramka SMS. Wiadomość zawiera osobisty link do aplikacji, a dotychczasowe linki pozostają aktywne. Tryb testowy nie dostarcza SMS-a. Przycisk **Wyślij linki do wszystkich** nadal obsługuje całą szkołę.
+
 1. Administrator otwiera **Nauczyciele** i klika ikonę linku przy wybranej osobie.
 2. Link i klucz powstają automatycznie przy dodaniu nauczyciela i zapisie importu CSV. Administrator kopiuje gotowy link i przekazuje go właściwemu nauczycielowi. Edycja danych, podgląd CSV i pominięte duplikaty nie zmieniają kluczy. Starsze wpisy, które nie mają zapisanego linku, nadal pozwalają wygenerować go ręcznie. Link jest generowany z adresu, pod którym administrator otworzył aplikację — do udostępniania poza komputerem użyj publicznego adresu HTTPS.
-3. Nauczyciel otwiera link `/nauczyciel#klucz=…` lub wpisuje klucz na stronie `/nauczyciel`. Nie otrzymuje dostępu do panelu administracyjnego ani listy kontaktów.
-4. Panel pokazuje imię i nazwisko, szkołę, duży przycisk **URUCHOM ALERT** oraz aktywne zdarzenia. Każde aktywne zdarzenie ma od razu widoczną pełną procedurę bezpieczeństwa. Uruchomienie wymaga wyboru alertu i podania miejsca zdarzenia.
+3. Nauczyciel otwiera link `/nauczyciel#klucz=…` lub wpisuje klucz na stronie `/nauczyciel`. Po poprawnym otwarciu linku lub wpisaniu klucza panel zapamiętuje klucz w localStorage tej przeglądarki i automatycznie odtwarza sesję. Wylogowanie usuwa zapisany klucz; unieważnienie przez administratora blokuje dostęp i usuwa klucz przy następnym sprawdzeniu. Klucz znika z adresu po zalogowaniu. Przycisk „Zainstaluj aplikację” znajduje się na górze panelu, przed danymi nauczyciela. Nauczyciel nie otrzymuje dostępu do panelu administracyjnego ani listy kontaktów.
+4. Panel pokazuje imię i nazwisko, szkołę, duży przycisk **URUCHOM ALERT** oraz aktywne zdarzenia. Każde aktywne zdarzenie ma od razu widoczną pełną procedurę bezpieczeństwa. Uruchomienie wymaga wyboru alertu. Miejsce zdarzenia jest opcjonalne; bez niego historia i SMS pokazują „Nie podano miejsca”.
 5. W otwartym panelu dane odświeżają się co 3 sekundy oraz po powrocie do aplikacji. Po uruchomieniu własnego alertu procedura pojawia się od razu; wysyłka SMS jest obsługiwana niezależnie i nie opóźnia odpowiedzi panelu nauczyciela. Alarm kończy administrator.
 
 Każdy nauczyciel ma własny losowy klucz 256-bitowy. Serwer przechowuje skrót SHA-256 do weryfikacji oraz zaszyfrowaną kopię AES-GCM do ponownego kopiowania przez administratora własnej szkoły. Kopia używa klucza `SMS_ENCRYPTION_KEY` z osobnym kontekstem szyfrowania dla panelu nauczyciela i szkoły. W produkcji klucz serwera jest wymagany także przy dodawaniu i imporcie nauczycieli, niezależnie od konfiguracji SMSAPI. Klucz nauczyciela jest odczytywany wyłącznie przez osobny endpoint administratora, znajduje się we fragmencie URL (nie w ścieżce ani query string) i po wymianie na sesję jest usuwany z paska adresu. Sesja nauczyciela ma oddzielne cookie HTTP-only/SameSite i trwa 30 dni; przeżywa restart backendu. Nie zastępuje sesji administratora, więc podgląd panelu nie wylogowuje administratora. Wygenerowanie nowego klucza, unieważnienie linku lub usunięcie nauczyciela natychmiast odcina poprzedni dostęp i sesje. Uprawnienia są zawsze ograniczone do szkoły przypisanej nauczycielowi.

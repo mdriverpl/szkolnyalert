@@ -1,10 +1,11 @@
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { id } from './store.js';
+import { sendHostava } from './hostava-sms.js';
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const defaults = { provider: 'smsapi', enabled: false, testMode: true, sender: '' };
-export const smsSummary = settings => ({ ...defaults, enabled: !!settings?.enabled, testMode: settings?.testMode !== false, sender: settings?.sender || '', hasToken: !!settings?.encryptedToken, updatedAt: settings?.updatedAt || null });
+export const smsSummary = settings => ({ ...defaults, provider: settings?.provider || defaults.provider, enabled: !!settings?.enabled, testMode: settings?.testMode !== false, sender: settings?.sender || '', hasToken: !!settings?.encryptedToken, updatedAt: settings?.updatedAt || null });
 export function smsPhone(value) {
   if (typeof value !== 'string' || !/^\+?[\d ()-]+$/.test(value.trim())) return null;
   let digits = value.replace(/\D/g, '');
@@ -18,7 +19,7 @@ export function smsRecipients(data, schoolId) {
   return { numbers: [...new Set(numbers.filter(Boolean))], omitted: numbers.filter(x => !x).length };
 }
 
-export function createSmsGateway(store, { encryptionKey, fetchImpl = (...args) => fetch(...args) } = {}) {
+export function createSmsGateway(store, { encryptionKey, fetchImpl = (...args) => fetch(...args), hostavaKey = process.env.HOSTAVA_SMS_KEY, now = () => new Date() } = {}) {
   let keyPromise;
   async function key() {
     if (!keyPromise) keyPromise = (async () => {
@@ -28,7 +29,7 @@ export function createSmsGateway(store, { encryptionKey, fetchImpl = (...args) =
         if (bytes.length !== 32) throw fail('SMS_ENCRYPTION_KEY musi zawierać 32 bajty zapisane jako base64.', 503);
         return bytes;
       }
-      if (!store.demo || process.env.NODE_ENV === 'production') throw fail('Skonfiguruj SMS_ENCRYPTION_KEY na serwerze przed zapisaniem tokenu SMSAPI.', 503);
+      if (!store.demo || process.env.NODE_ENV === 'production') throw fail('Skonfiguruj SMS_ENCRYPTION_KEY na serwerze przed zapisaniem klucza API SMS.', 503);
       await mkdir('data', { recursive: true });
       const path = 'data/sms-encryption.key';
       try { await writeFile(path, randomBytes(32), { flag: 'wx', mode: 0o600 }); } catch (error) { if (error.code !== 'EEXIST') throw error; }
@@ -49,7 +50,7 @@ export function createSmsGateway(store, { encryptionKey, fetchImpl = (...args) =
       const [iv, tag, ciphertext] = value.split('.').map(x => Buffer.from(x, 'base64'));
       const decipher = createDecipheriv('aes-256-gcm', await key(), iv); decipher.setAAD(Buffer.from(schoolId)); decipher.setAuthTag(tag);
       return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
-    } catch { throw fail('Nie można odczytać tokenu SMSAPI. Sprawdź klucz serwera lub zapisz token ponownie.', 503); }
+    } catch { throw fail('Nie można odczytać klucza API SMS. Sprawdź klucz serwera lub zapisz token ponownie.', 503); }
   }
   async function getSettings(schoolId) {
     const data = await store.read();
@@ -58,18 +59,25 @@ export function createSmsGateway(store, { encryptionKey, fetchImpl = (...args) =
   }
   async function saveSettings(schoolId, body) {
     if (typeof body.enabled !== 'boolean' || typeof body.testMode !== 'boolean') throw fail('Wybierz tryb i stan bramki SMS.');
+    if (body.provider !== undefined && !['smsapi', 'hostava'].includes(body.provider)) throw fail('Wybierz poprawnego operatora SMS.');
     if (typeof body.sender !== 'string' || body.sender.length > 11 || /[\r\n\x00-\x1f]/.test(body.sender)) throw fail('Nazwa nadawcy może mieć maksymalnie 11 znaków.');
     let encryptedToken;
     if (body.token) {
-      if (typeof body.token !== 'string' || body.token.length < 10 || body.token.length > 4096 || /\s/.test(body.token)) throw fail('Podaj poprawny token OAuth SMSAPI, bez spacji.');
+      if (typeof body.token !== 'string' || body.token.length < 10 || body.token.length > 4096 || /\s/.test(body.token)) throw fail('Podaj poprawny klucz API SMS, bez spacji.');
       encryptedToken = await encrypt(body.token, schoolId);
     }
+    // The optional server key is encrypted for this school when settings are saved.
+    const current = (await store.read()).smsSettings?.find(x => x.schoolId === schoolId);
+    const selectedProvider = body.provider || current?.provider || defaults.provider;
+    if (!encryptedToken && selectedProvider === 'hostava' && (!current?.encryptedToken || current.provider !== 'hostava') && hostavaKey) encryptedToken = await encrypt(hostavaKey, schoolId);
     await store.mutate(data => {
       data.smsSettings ??= [];
       const previous = data.smsSettings.find(x => x.schoolId === schoolId);
-      const settings = { schoolId, ...defaults, ...previous, enabled: body.enabled, testMode: body.testMode, sender: body.sender.trim(), updatedAt: new Date().toISOString() };
+      const provider = body.provider || previous?.provider || defaults.provider;
+      const settings = { schoolId, ...defaults, ...previous, provider, enabled: body.enabled, testMode: body.testMode, sender: body.sender.trim(), updatedAt: new Date().toISOString() };
+      if (provider !== (previous?.provider || defaults.provider)) { delete settings.encryptedToken; delete settings.lastTest; }
       if (encryptedToken) settings.encryptedToken = encryptedToken;
-      if (settings.enabled && !settings.encryptedToken) throw fail('Zapisz token SMSAPI przed włączeniem automatycznych SMS-ów.');
+      if (settings.enabled && !settings.encryptedToken) throw fail('Zapisz klucz API przed włączeniem automatycznych SMS-ów.');
       data.smsSettings = data.smsSettings.filter(x => x.schoolId !== schoolId); data.smsSettings.push(settings);
     });
     return getSettings(schoolId);
@@ -79,7 +87,9 @@ export function createSmsGateway(store, { encryptionKey, fetchImpl = (...args) =
     return getSettings(schoolId);
   }
   async function send(settings, schoolId, numbers, message) {
+    if (settings.provider === 'hostava' && settings.testMode !== false) return { status: 'test', testMode: true, accepted: numbers.length, total: numbers.length, message: 'Symulacja lokalna Hostava. Nie wywołano API i nie wysłano SMS-ów; klucz i saldo nie zostały sprawdzone.' };
     const token = await decrypt(settings.encryptedToken, schoolId);
+    if (settings.provider === 'hostava') return sendHostava({ token, numbers, text: message, date: now(), fetchImpl });
     const params = new URLSearchParams({ to: numbers.join(','), message, format: 'json' });
     if (settings.sender) params.set('from', settings.sender);
     if (settings.testMode !== false) params.set('test', '1');
@@ -98,8 +108,8 @@ export function createSmsGateway(store, { encryptionKey, fetchImpl = (...args) =
     const number = smsPhone(phone);
     if (!number) throw fail('Podaj poprawny numer testowy, np. +48 500 600 700.');
     const data = await store.read(), settings = data.smsSettings?.find(x => x.schoolId === schoolId);
-    if (!settings?.encryptedToken) throw fail('Najpierw zapisz token SMSAPI.');
-    const result = await send(settings, schoolId, [number], 'Szkolny Alert: test polaczenia z bramka SMSAPI.');
+    if (!settings?.encryptedToken) throw fail('Najpierw zapisz klucz API SMS.');
+    const result = await send(settings, schoolId, [number], `Szkolny Alert: test polaczenia z bramka ${settings.provider === 'hostava' ? 'Hostava' : 'SMSAPI'}.`);
     await store.mutate(data => { const current = data.smsSettings?.find(x => x.schoolId === schoolId); if (current) current.lastTest = { ...result, at: new Date().toISOString() }; });
     return result;
   }

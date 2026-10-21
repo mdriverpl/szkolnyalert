@@ -77,3 +77,36 @@ test('provider rejection removes only new failed keys; uncertain results retain 
   const keys = (await f.store.read()).teacherKeys;
   assert.equal(keys.length, 2); assert.equal(keys[0].keyHash, 'old-key'); assert.equal(keys[1].teacherId, 'b');
 });
+
+test('single-teacher batches send only to the selected teacher and cannot be widened at confirmation', async t => {
+  const f = await fixture(t);
+  const p = await f.service.preview('school-demo', 'admin', 'https://school.example', 'b');
+  assert.equal(p.count, 1); assert.equal(p.teacherId, 'b'); assert.equal(p.canSend, true);
+  assert.deepEqual(p.recipients.map(x => x.id), ['b']);
+  assert.equal(f.calls.length, 0);
+  const result = await f.service.send('school-demo', 'admin', 'https://school.example', {
+    batchId: p.batchId, expectedCount: 1, confirmed: true, teacherId: 'a'
+  });
+  assert.equal(result.accepted, 1);
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].phone, '48500600702');
+  assert.ok(f.calls[0].link.startsWith('https://school.example/nauczyciel#klucz='));
+  const keys = (await f.store.read()).teacherKeys;
+  assert.equal(keys.length, 2); assert.equal(keys[0].keyHash, 'old-key'); assert.equal(keys[1].teacherId, 'b');
+  await f.send(p); assert.equal(f.calls.length, 1, 'a batch is never sent twice');
+});
+
+test('single-teacher preview rejects foreign IDs and blocks missing or shared phones and stale recipients', async t => {
+  const f = await fixture(t);
+  for (const id of ['other', 'missing', '', ['a']]) {
+    await assert.rejects(f.service.preview('school-demo', 'admin', 'https://school.example', id), { status: 404 });
+  }
+  for (const id of ['c', 'd']) {
+    const p = await f.service.preview('school-demo', 'admin', 'https://school.example', id);
+    assert.equal(p.canSend, false); assert.equal(p.count, 0); assert.equal(p.skipped.length, 1);
+    await assert.rejects(f.send(p), { status: 400 });
+  }
+  const p = await f.service.preview('school-demo', 'admin', 'https://school.example', 'a');
+  await f.store.mutate(data => { data.teachers[0].phone = '500600777'; });
+  await assert.rejects(f.send(p), { status: 409 });
+  assert.equal(f.calls.length, 0);
+});

@@ -16,11 +16,21 @@ const availableAlerts = computed(() => (data.value?.alerts || []).filter(alert =
 const level = value => ({ critical: 'POWAŻNY ALERT', warning: 'ALERT OSTRZEGAWCZY', info: 'KOMUNIKAT' }[value]);
 const date = value => new Date(value).toLocaleString('pl-PL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 let interval, requestVersion = 0;
+const savedKeyName = 'szkolnyalert.teacherKey';
+function savedKey() {
+  try { return window.localStorage.getItem(savedKeyName) || ''; } catch { return ''; }
+}
+function rememberKey(key) {
+  try {
+    if (key) window.localStorage.setItem(savedKeyName, key);
+    else window.localStorage.removeItem(savedKeyName);
+  } catch { /* Access still works when browser storage is unavailable. */ }
+}
 async function api(path, options = {}) {
   const response = await fetch('/api/teacher-panel' + path, { ...options, headers: { 'Content-Type': 'application/json', ...options.headers }, signal: AbortSignal.timeout(12000) });
   const result = await response.json();
   if (!response.ok) {
-    if (response.status === 401) { needsKey.value = true; data.value = null; launchOpen.value = false; }
+    if (response.status === 401) { needsKey.value = true; data.value = null; launchOpen.value = false; if (path === '/access') rememberKey(''); }
     throw Object.assign(new Error(result.error || 'Nie udało się wykonać operacji.'), { status: response.status });
   }
   return result;
@@ -28,16 +38,24 @@ async function api(path, options = {}) {
 async function refresh() {
   const version = ++requestVersion;
   try {
-    const result = await api('/state');
+    let result;
+    try { result = await api('/state'); }
+    catch (e) {
+      const key = savedKey();
+      if (e.status !== 401 || !key) throw e;
+      await api('/access', { method: 'POST', body: JSON.stringify({ key }) });
+      result = await api('/state');
+    }
     if (version === requestVersion) { data.value = result; connected.value = true; needsKey.value = false; error.value = ''; }
   } catch (e) { if (version === requestVersion) { connected.value = false; error.value = e.status ? e.message : 'Brak połączenia z serwerem. Dane na ekranie mogą być nieaktualne.'; } }
 }
 async function initialize() {
   loading.value = true; error.value = '';
-  const key = accessKey.value.trim() || new URLSearchParams(window.location.hash.slice(1)).get('klucz');
+  const key = accessKey.value.trim() || new URLSearchParams(window.location.hash.slice(1)).get('klucz') || savedKey();
   try {
     if (key) {
       await api('/access', { method: 'POST', body: JSON.stringify({ key }) });
+      rememberKey(key);
       window.history.replaceState(null, '', window.location.pathname);
       accessKey.value = ''; needsKey.value = false;
     }
@@ -60,6 +78,7 @@ async function launch() {
   finally { sending.value = false; }
 }
 async function logout() {
+  rememberKey('');
   try { await api('/logout', { method: 'POST' }); data.value = null; needsKey.value = true; connected.value = false; }
   catch (e) { error.value = e.message; }
 }
@@ -105,6 +124,7 @@ onUnmounted(() => {
       <div v-if="loading" class="teacher-loading"><LoaderCircle class="spin" :size="30"/><p>Otwieranie Twojego panelu…</p></div>
       <section v-else-if="!data" class="teacher-access panel"><KeyRound :size="35"/><h1>Twój osobisty panel.</h1><p>Otwórz link otrzymany od szkoły albo wpisz swój klucz dostępu.</p><p v-if="error" class="error" role="alert">{{ error }}</p><form @submit.prevent="initialize"><label>Klucz nauczyciela<input v-model="accessKey" type="password" required maxlength="64" autocomplete="off" spellcheck="false" placeholder="Klucz z linku od szkoły"></label><button class="btn primary full">Otwórz mój panel <ArrowRight :size="17"/></button></form><button v-if="!needsKey" class="text-link" @click="initialize">Spróbuj połączyć ponownie</button></section>
       <template v-else>
+        <section class="teacher-install"><div><Download :size="22"/><span><strong>{{ standalone ? 'Aplikacja jest zainstalowana' : 'Miej swój panel zawsze pod ręką' }}</strong><small>Klucz zapamiętujemy na tym urządzeniu. Twój link jest osobisty — nie przekazuj go innym.</small></span></div><button v-if="!standalone" class="btn secondary" @click="install">Zainstaluj aplikację</button><div v-if="installHelp" class="teacher-install-help"><p><strong>Android:</strong> w menu przeglądarki wybierz „Zainstaluj aplikację” lub „Dodaj do ekranu głównego”.</p><p><strong>iPhone:</strong> otwórz link w Safari → Udostępnij → Do ekranu początkowego.</p><p>Instalacja na telefonie wymaga udostępnienia aplikacji przez HTTPS.</p></div></section>
         <section class="teacher-identity"><span class="eyebrow">{{ data.school.name }}</span><h1>{{ data.teacher.name }}</h1><p>{{ data.teacher.subject }}</p><div class="teacher-connection"><span :class="['status-dot', { orange: !connected }]"></span>{{ connected ? 'Połączono ze szkołą' : 'Brak aktualnego połączenia' }}<span v-if="data.checkedAt">· {{ date(data.checkedAt) }}</span></div></section>
         <div v-if="!connected" class="teacher-offline" role="alert"><WifiOff :size="22"/><div><strong>Dane mogą być nieaktualne</strong><p>{{ error }}</p><button class="text-link" @click="refresh">Sprawdź połączenie</button></div></div>
         <div v-if="active.length" class="teacher-alerts">
@@ -117,11 +137,11 @@ onUnmounted(() => {
           </article>
         </div>
         <section v-else :class="['teacher-calm panel', { stale: !connected }]"><CheckCircle2 :size="37"/><h2>{{ connected ? 'Brak aktywnych alertów' : 'Nie można potwierdzić bieżącego stanu' }}</h2><p>{{ connected ? 'Procedura bezpieczeństwa pojawi się tutaj automatycznie po uruchomieniu alertu w Twojej szkole.' : 'Ostatni odczyt nie zawierał aktywnych alertów. Odzyskaj połączenie, aby sprawdzić aktualną sytuację.' }}</p></section>
-        <section class="teacher-launch"><button class="teacher-alert-button" :disabled="!connected || !availableAlerts.length" @click="openLaunch"><Radio :size="29"/><span>URUCHOM ALERT<small>Zgłoś zdarzenie w swojej szkole</small></span><ArrowRight :size="23"/></button><p v-if="!availableAlerts.length">{{ data.alerts.length ? 'Wszystkie zdefiniowane alerty są już aktywne.' : 'Administrator nie zdefiniował jeszcze alertów.' }}</p><p v-else>W następnym kroku wybierzesz rodzaj alertu i miejsce zdarzenia.</p></section>
-        <section class="teacher-install"><div><Download :size="22"/><span><strong>{{ standalone ? 'Aplikacja jest zainstalowana' : 'Miej swój panel zawsze pod ręką' }}</strong><small>Twój link jest osobisty. Nie przekazuj go innym osobom.</small></span></div><button v-if="!standalone" class="btn secondary" @click="install">Zainstaluj aplikację</button><div v-if="installHelp" class="teacher-install-help"><p><strong>Android:</strong> w menu przeglądarki wybierz „Zainstaluj aplikację” lub „Dodaj do ekranu głównego”.</p><p><strong>iPhone:</strong> otwórz link w Safari → Udostępnij → Do ekranu początkowego.</p><p>Instalacja na telefonie wymaga udostępnienia aplikacji przez HTTPS.</p></div></section>
+        <section class="teacher-launch"><button class="teacher-alert-button" :disabled="!connected || !availableAlerts.length" @click="openLaunch"><Radio :size="29"/><span>URUCHOM ALERT<small>Zgłoś zdarzenie w swojej szkole</small></span><ArrowRight :size="23"/></button><p v-if="!availableAlerts.length">{{ data.alerts.length ? 'Wszystkie zdefiniowane alerty są już aktywne.' : 'Administrator nie zdefiniował jeszcze alertów.' }}</p><p v-else>W następnym kroku wybierzesz rodzaj alertu. Miejsce zdarzenia jest opcjonalne.</p></section>
+
       </template>
     </main>
     <footer class="teacher-footer">Szkolny Alert · Panel nauczyciela<span>Aktualizacja co 3 sekundy przy otwartym panelu</span></footer>
-    <div v-if="launchOpen" class="modal-backdrop" @click.self="!sending && (launchOpen = false)"><section ref="launchDialog" class="modal teacher-launch-modal" role="dialog" aria-modal="true" aria-labelledby="teacher-launch-title"><header><div><span class="eyebrow">POTWIERDZENIE ZDARZENIA</span><h2 id="teacher-launch-title">Uruchom alert w szkole</h2></div><button class="icon-button" aria-label="Zamknij" :disabled="sending" @click="launchOpen = false"><X :size="22"/></button></header><form @submit.prevent="launch"><label>Rodzaj alertu<select v-model="selectedAlert" required :disabled="sending"><option v-for="alert in availableAlerts" :key="alert.id" :value="alert.id">{{ alert.name }}</option></select></label><label>Miejsce zdarzenia<input v-model="location" required maxlength="200" :disabled="sending" placeholder="np. Budynek A, sala 12" autofocus></label><p class="form-hint">Alert pojawi się w panelach nauczycieli Twojej szkoły. {{ data.smsGateway.enabled ? (data.smsGateway.testMode ? 'SMSAPI działa w trybie testowym, bez dostarczenia SMS-ów.' : 'Włączona jest rzeczywista wysyłka SMS do nauczycieli.') : 'Automatyczne SMS-y są wyłączone.' }}</p><p v-if="launchError" class="error" role="alert">{{ launchError }}</p><div class="modal-footer"><button type="button" class="btn secondary" :disabled="sending" @click="launchOpen = false">Anuluj</button><button class="btn danger" :disabled="sending || !connected || !selectedAlert">{{ sending ? 'Uruchamianie…' : 'Potwierdzam — uruchom ALERT' }}<Radio :size="17"/></button></div></form></section></div>
+    <div v-if="launchOpen" class="modal-backdrop" @click.self="!sending && (launchOpen = false)"><section ref="launchDialog" class="modal teacher-launch-modal" role="dialog" aria-modal="true" aria-labelledby="teacher-launch-title"><header><div><span class="eyebrow">POTWIERDZENIE ZDARZENIA</span><h2 id="teacher-launch-title">Uruchom alert w szkole</h2></div><button class="icon-button" aria-label="Zamknij" :disabled="sending" @click="launchOpen = false"><X :size="22"/></button></header><form @submit.prevent="launch"><label>Rodzaj alertu<select v-model="selectedAlert" required :disabled="sending"><option v-for="alert in availableAlerts" :key="alert.id" :value="alert.id">{{ alert.name }}</option></select></label><label>Miejsce zdarzenia (opcjonalnie)<input v-model="location" maxlength="200" :disabled="sending" placeholder="np. Budynek A, sala 12" autofocus></label><p class="form-hint">Alert pojawi się w panelach nauczycieli Twojej szkoły. {{ data.smsGateway.enabled ? (data.smsGateway.testMode ? 'Bramka SMS działa w trybie testowym, bez dostarczenia SMS-ów.' : 'Włączona jest rzeczywista wysyłka SMS do nauczycieli.') : 'Automatyczne SMS-y są wyłączone.' }}</p><p v-if="launchError" class="error" role="alert">{{ launchError }}</p><div class="modal-footer"><button type="button" class="btn secondary" :disabled="sending" @click="launchOpen = false">Anuluj</button><button class="btn danger" :disabled="sending || !connected || !selectedAlert">{{ sending ? 'Uruchamianie…' : 'Potwierdzam — uruchom ALERT' }}<Radio :size="17"/></button></div></form></section></div>
   </div>
 </template>

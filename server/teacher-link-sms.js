@@ -4,12 +4,14 @@ import { smsPhone } from './smsapi.js';
 const hash = value => createHash('sha256').update(value).digest('hex');
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 
-function snapshot(data, schoolId, origin) {
+function snapshot(data, schoolId, origin, teacherId = null) {
   const settings = data.smsSettings?.find(x => x.schoolId === schoolId);
   const teachers = data.teachers.filter(x => x.schoolId === schoolId);
+  if (teacherId !== null && (typeof teacherId !== 'string' || !teachers.some(x => x.id === teacherId))) throw fail('Nie znaleziono nauczyciela.', 404);
   const phones = teachers.map(x => smsPhone(x.phone));
   const recipients = [], skipped = [];
   teachers.forEach((teacher, index) => {
+    if (teacherId !== null && teacher.id !== teacherId) return;
     const phone = phones[index];
     const entry = { id: teacher.id, name: teacher.name, phone: phone || teacher.phone || '' };
     if (!phone) skipped.push({ ...entry, reason: 'Brak poprawnego numeru telefonu' });
@@ -26,22 +28,22 @@ function snapshot(data, schoolId, origin) {
   } catch { /* Configuration is reported in the preview. */ }
   const testMode = settings?.testMode !== false;
   const issues = [];
-  if (!settings?.encryptedToken) issues.push('Najpierw zapisz token SMSAPI w Ustawieniach.');
+  if (!settings?.encryptedToken) issues.push('Najpierw zapisz klucz API SMS w Ustawieniach.');
   if (!recipients.length) issues.push('Brak nauczycieli z poprawnym, unikalnym numerem telefonu.');
   if (recipients.length > 500) issues.push('Jedna wysyłka może obejmować maksymalnie 500 osób.');
   if (!baseUrl || (!testMode && !publicUrl)) issues.push('Ustaw PUBLIC_APP_URL na publiczny adres HTTPS aplikacji przed rzeczywistą wysyłką.');
-  const fingerprint = hash(JSON.stringify({ recipients, skipped, baseUrl, settings }));
-  return { recipients, skipped, count: recipients.length, baseUrl, testMode, issues, canSend: !issues.length, fingerprint, settings };
+  const fingerprint = hash(JSON.stringify({ teacherId, recipients, skipped, baseUrl, settings }));
+  return { teacherId, recipients, skipped, count: recipients.length, baseUrl, testMode, issues, canSend: !issues.length, fingerprint, settings };
 }
 const publicPreview = ({ settings, fingerprint, ...value }) => value;
 
 export function createTeacherLinkSms(store, sms) {
-  async function preview(schoolId, userId, origin) {
+  async function preview(schoolId, userId, origin, teacherId = null) {
     return store.mutate(data => {
-      const current = snapshot(data, schoolId, origin);
+      const current = snapshot(data, schoolId, origin, teacherId);
       const batchId = randomUUID(), expires = Date.now() + 10 * 60_000;
       data.teacherLinkBatches = (data.teacherLinkBatches || []).filter(x => x.status !== 'preview' || x.expires > Date.now());
-      data.teacherLinkBatches.push({ batchId, schoolId, userId, expires, fingerprint: current.fingerprint, status: 'preview' });
+      data.teacherLinkBatches.push({ batchId, schoolId, userId, teacherId, expires, fingerprint: current.fingerprint, status: 'preview' });
       return { ...publicPreview(current), batchId };
     });
   }
@@ -50,8 +52,8 @@ export function createTeacherLinkSms(store, sms) {
       const batch = data.teacherLinkBatches?.find(x => x.batchId === body.batchId && x.schoolId === schoolId && x.userId === userId);
       if (!batch) throw fail('Otwórz ponownie potwierdzenie wysyłki.', 404);
       if (body.confirmed !== true) throw fail('Potwierdź wysyłkę SMS.');
-      if (batch.status !== 'preview') return { existing: batch.result || { status: 'sending', message: 'Wysyłka została już rozpoczęta. Sprawdź SMSAPI; nie ponawiaj jej automatycznie.' } };
-      const current = snapshot(data, schoolId, origin);
+      if (batch.status !== 'preview') return { existing: batch.result || { status: 'sending', message: 'Wysyłka została już rozpoczęta. Sprawdź panel operatora; nie ponawiaj jej automatycznie.' } };
+      const current = snapshot(data, schoolId, origin, batch.teacherId ?? null);
       if (batch.expires < Date.now() || batch.fingerprint !== current.fingerprint || body.expectedCount !== current.count) throw fail('Lista odbiorców lub ustawienia zmieniły się. Zamknij okno i sprawdź nowe potwierdzenie.', 409);
       if (!current.canSend) throw fail(current.issues.join(' '));
       batch.status = 'sending';
@@ -84,7 +86,7 @@ export function createTeacherLinkSms(store, sms) {
     const result = {
       status: unknown ? 'unknown' : accepted === results.length ? (job.testMode ? 'test' : 'accepted') : accepted ? 'partial' : 'failed',
       total: results.length, accepted, unknown, failed: results.length - accepted - unknown, skipped: job.skipped, testMode: job.testMode,
-      message: unknown ? 'Część wyników jest nieznana. Sprawdź SMSAPI przed kolejną wysyłką.' : job.testMode ? 'Próba API zakończona. SMS-y nie zostały dostarczone; linki testowe nie dają dostępu.' : 'Wysyłka zakończona. Liczba przyjętych przez SMSAPI nie oznacza potwierdzenia doręczenia.'
+      message: unknown ? 'Część wyników jest nieznana. Sprawdź panel operatora przed kolejną wysyłką.' : job.testMode ? 'Tryb testowy zakończony. SMS-y nie zostały dostarczone; linki testowe nie dają dostępu.' : 'Wysyłka zakończona. Liczba przyjętych przez operatora nie oznacza potwierdzenia doręczenia.'
     };
     await store.mutate(data => {
       const batch = data.teacherLinkBatches.find(x => x.batchId === job.batchId && x.schoolId === schoolId);

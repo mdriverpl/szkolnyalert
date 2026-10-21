@@ -125,6 +125,20 @@ test('alert lifecycle retains a snapshot of the procedure in its own school', as
   assert.equal((await request(`/incidents/${event.id}/resolve`, 'POST')).status, 400);
 });
 
+test('alerts launch without a location but still validate supplied values', async t => {
+  const { client } = await fixture(t); const admin = client(); await login(admin);
+  for (const location of [null, 42, 'x'.repeat(201), ' '.repeat(201)]) {
+    assert.equal((await admin('/incidents', 'POST', { alertId: 'alert-2', location })).status, 400);
+  }
+  for (const fields of [{}, { location: '' }, { location: '   ' }, { location: ' Sala 12 ' }]) {
+    const result = await admin('/incidents', 'POST', { alertId: 'alert-2', ...fields });
+    assert.equal(result.status, 201);
+    assert.equal(result.body.location, fields.location?.trim() || 'Nie podano miejsca');
+    assert.ok(result.body.procedure.steps.length);
+    await admin(`/incidents/${result.body.id}/resolve`, 'POST');
+  }
+});
+
 test('user phone is optional, validated, editable and limited to its school', async t => {
   const { client } = await fixture(t); const admin = client(), other = client();
   await login(admin); await login(other, 'admin2@szkolnyalert.pl');
