@@ -103,9 +103,11 @@ test('Hostava alerts deduplicate school recipients and personal links use the sa
   assert.equal(calls.length, 1);
   assert.equal(calls[0].to, '+48500600700');
   assert.ok(calls[0].text.includes('Sala 1'));
+  assert.ok(calls[0].text.length <= 70);
   const data = await store.read();
   assert.equal(data.incidents.find(x => x.id === 'hostava-incident').sms.status, 'accepted');
   const link = 'https://school.example/nauczyciel#klucz=test';
   assert.equal((await gateway.sendLink(data.smsSettings[0], 'school-demo', '48500600700', link)).status, 'accepted');
-  assert.equal(calls.length, 2); assert.ok(calls[1].text.includes(link));
+  assert.equal(calls.length, 2); assert.equal(calls[1].text, link);
+  assert.ok(calls[1].text.length <= 70);
 });

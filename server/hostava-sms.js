@@ -1,3 +1,4 @@
+import { validateSmsText } from './sms-text.js';
 import { createHash } from 'node:crypto';
 
 // Stable for the same canonical recipient, exact text and Warsaw calendar day.
@@ -7,6 +8,7 @@ export function hostavaIdempotencyKey(phone, text, date = new Date()) {
 }
 
 export async function sendHostava({ token, numbers, text, date = new Date(), fetchImpl = fetch }) {
+  validateSmsText(text);
   const results = new Array(numbers.length);
   let cursor = 0;
   await Promise.all(Array.from({ length: Math.min(5, numbers.length) }, async () => {

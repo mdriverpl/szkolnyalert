@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { smsPhone } from './smsapi.js';
+import { SMS_MAX_LENGTH } from './sms-text.js';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -32,6 +33,7 @@ function snapshot(data, schoolId, origin, teacherId = null) {
   if (!recipients.length) issues.push('Brak nauczycieli z poprawnym, unikalnym numerem telefonu.');
   if (recipients.length > 500) issues.push('Jedna wysyłka może obejmować maksymalnie 500 osób.');
   if (!baseUrl || (!testMode && !publicUrl)) issues.push('Ustaw PUBLIC_APP_URL na publiczny adres HTTPS aplikacji przed rzeczywistą wysyłką.');
+  if (baseUrl && (baseUrl + '/n#' + 'x'.repeat(43)).length > SMS_MAX_LENGTH) issues.push('Adres aplikacji jest za długi na SMS do 70 znaków. Ustaw krótszy PUBLIC_APP_URL.');
   const fingerprint = hash(JSON.stringify({ teacherId, recipients, skipped, baseUrl, settings }));
   return { teacherId, recipients, skipped, count: recipients.length, baseUrl, testMode, issues, canSend: !issues.length, fingerprint, settings };
 }
@@ -58,13 +60,13 @@ export function createTeacherLinkSms(store, sms) {
       if (!current.canSend) throw fail(current.issues.join(' '));
       batch.status = 'sending';
       const messages = current.recipients.map(person => {
-        const key = randomBytes(32).toString('hex');
+        const key = randomBytes(32).toString('base64url');
         const keyHash = hash(key);
         if (!current.testMode) {
           data.teacherKeys ??= [];
           data.teacherKeys.push({ teacherId: person.id, schoolId, keyHash, createdAt: new Date().toISOString(), batchId: batch.batchId });
         }
-        return { ...person, keyHash, link: `${current.baseUrl}/nauczyciel#klucz=${key}` };
+        return { ...person, keyHash, link: `${current.baseUrl}/n#${key}` };
       });
       return { messages, settings: current.settings, testMode: current.testMode, batchId: batch.batchId, skipped: current.skipped.length };
     });

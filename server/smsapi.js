@@ -1,3 +1,4 @@
+import { validateSmsText, incidentSms } from './sms-text.js';
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { id } from './store.js';
@@ -87,6 +88,7 @@ export function createSmsGateway(store, { encryptionKey, fetchImpl = (...args) =
     return getSettings(schoolId);
   }
   async function send(settings, schoolId, numbers, message) {
+    validateSmsText(message);
     if (settings.provider === 'hostava' && settings.testMode !== false) return { status: 'test', testMode: true, accepted: numbers.length, total: numbers.length, message: 'Symulacja lokalna Hostava. Nie wywołano API i nie wysłano SMS-ów; klucz i saldo nie zostały sprawdzone.' };
     const token = await decrypt(settings.encryptedToken, schoolId);
     if (settings.provider === 'hostava') return sendHostava({ token, numbers, text: message, date: now(), fetchImpl });
@@ -109,7 +111,7 @@ export function createSmsGateway(store, { encryptionKey, fetchImpl = (...args) =
     if (!number) throw fail('Podaj poprawny numer testowy, np. +48 500 600 700.');
     const data = await store.read(), settings = data.smsSettings?.find(x => x.schoolId === schoolId);
     if (!settings?.encryptedToken) throw fail('Najpierw zapisz klucz API SMS.');
-    const result = await send(settings, schoolId, [number], `Szkolny Alert: test polaczenia z bramka ${settings.provider === 'hostava' ? 'Hostava' : 'SMSAPI'}.`);
+    const result = await send(settings, schoolId, [number], `Szkolny Alert: test SMS ${settings.provider === 'hostava' ? 'Hostava' : 'SMSAPI'}.`);
     await store.mutate(data => { const current = data.smsSettings?.find(x => x.schoolId === schoolId); if (current) current.lastTest = { ...result, at: new Date().toISOString() }; });
     return result;
   }
@@ -122,9 +124,8 @@ export function createSmsGateway(store, { encryptionKey, fetchImpl = (...args) =
       const recipients = smsRecipients(data, schoolId);
       if (!recipients.numbers.length) { incident.sms = { status: 'no_recipients', message: 'Brak poprawnych numerów nauczycieli.' }; return null; }
       if (recipients.numbers.length > 10000) { incident.sms = { status: 'failed', message: 'Przekroczono limit 10 000 odbiorców.' }; return null; }
-      const school = data.schools.find(x => x.id === schoolId);
       incident.sms = { status: 'sending', attemptId: id(), total: recipients.numbers.length, omitted: recipients.omitted, at: new Date().toISOString() };
-      const message = `${incident.isTest ? '[TEST - CWICZENIE] ' : ''}[Szkolny Alert] ${school.name.slice(0, 65)}\n${incident.name.slice(0, 90)}\nMiejsce: ${incident.location.slice(0, 110)}\nProcedura: ${incident.procedure.name.slice(0, 65)}. Sprawdz panel szkoly.`;
+      const message = incidentSms(incident);
       return { settings, recipients, message, attemptId: incident.sms.attemptId };
     });
     if (!job) return;
@@ -136,6 +137,6 @@ export function createSmsGateway(store, { encryptionKey, fetchImpl = (...args) =
       if (incident?.sms?.attemptId === job.attemptId) incident.sms = { ...incident.sms, ...result };
     });
   }
-  const sendLink = (settings, schoolId, number, link) => send(settings, schoolId, [number], `Szkolny Alert: Twoj osobisty panel nauczyciela. Zachowaj link tylko dla siebie: ${link}`);
+  const sendLink = (settings, schoolId, number, link) => send(settings, schoolId, [number], link);
   return { getSettings, saveSettings, removeToken, test, notifyIncident, sendLink, sealAccessKey: encrypt, openAccessKey: decrypt };
 }

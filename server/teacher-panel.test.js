@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createApp } from './app.js';
 import { createStore } from './store.js';
 import { teacherDeliveryStatus } from './teacher-panel.js';
+import { createTeacherLinkSms } from './teacher-link-sms.js';
 
 async function fixture(t) {
   const store = await createStore({ memory: true });
@@ -155,4 +156,30 @@ test('delivery badges ignore other schools, expired sessions, revoked keys and o
   assert.equal(teacherDeliveryStatus(data, teacher, config, now).notificationsEnabled, false);
   data.pushSubscriptions[0].schoolId = 's1'; data.teacherKeys = [];
   assert.deepEqual(teacherDeliveryStatus(data, teacher, config, now), { online: false, notificationsEnabled: false });
+});
+
+
+test('compact SMS links retain 256-bit keys, open the correct teacher panel, and are revocable', async t => {
+  const { store, client } = await fixture(t), admin = client(), panel = client();
+  await login(admin);
+  await store.mutate(data => {
+    data.smsSettings = [{ schoolId: 'school-demo', encryptedToken: 'fake', testMode: false }];
+    data.teachers.find(x => x.id === 'teacher-1').phone = '500600777';
+  });
+  let sent;
+  const links = createTeacherLinkSms(store, { sendLink: async (_, __, phone, link) => { sent = { phone, link }; return { status: 'accepted', accepted: 1 }; } });
+  const preview = await links.preview('school-demo', 'admin', 'https://szkolnyalert.pl', 'teacher-1');
+  assert.equal(preview.canSend, true);
+  await links.send('school-demo', 'admin', 'https://szkolnyalert.pl', { batchId: preview.batchId, confirmed: true, expectedCount: 1 });
+  assert.equal(sent.link.length, 69);
+  const url = new URL(sent.link), key = url.hash.slice(1);
+  assert.equal(url.pathname, '/n');
+  assert.equal(Buffer.from(key, 'base64url').length, 32);
+  assert.equal(JSON.stringify(await store.read()).includes(key), false);
+  assert.equal((await panel('/teacher-panel/access', 'POST', { key })).status, 200);
+  assert.equal((await panel('/teacher-panel/state')).body.teacher.id, 'teacher-1');
+  const tooLong = await links.preview('school-demo', 'admin', 'https://very-long-school-subdomain.example.com', 'teacher-1');
+  assert.equal(tooLong.canSend, false);
+  await admin('/teachers/teacher-1/panel-key', 'DELETE');
+  assert.equal((await panel('/teacher-panel/access', 'POST', { key })).status, 401);
 });

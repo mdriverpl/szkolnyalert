@@ -77,6 +77,7 @@ test('an alert sends only once to unique teachers of its own school; failures do
   const params = new URLSearchParams(calls[0].options.body);
   assert.equal(params.get('to'), '48500600700'); assert.equal(params.has('test'), false);
   assert.ok(params.get('message').includes('Sala 1'));
+  assert.ok(params.get('message').length <= 70);
   assert.equal((await admin('/incidents', 'POST', { alertId: 'alert-2', location: 'Sala 1' })).status, 400);
   await createSmsGateway(store, sms).notifyIncident('school-demo', created.body.id);
   assert.equal(calls.length, 1, 'reopening the gateway never retries an existing attempt');
@@ -132,7 +133,7 @@ test('test alerts retain their marker in history and label actual SMS messages a
   assert.equal(incident.status, 201); assert.equal(incident.body.isTest, true);
   assert.equal(incident.body.name, '[TEST] Sprawdzenie systemu');
   assert.equal(incident.body.sms.status, 'accepted'); assert.equal(calls.length, 1);
-  assert.match(new URLSearchParams(calls[0].options.body).get('message'), /^\[TEST - CWICZENIE\]/);
+  assert.match(new URLSearchParams(calls[0].options.body).get('message'), /^TEST ALERT:/);
   const { isTest, ...withoutMarker } = definition;
   assert.equal((await admin(`/alerts/${created.body.id}`, 'PUT', withoutMarker)).body.isTest, true);
   await admin(`/alerts/${created.body.id}`, 'PUT', { ...definition, isTest: false });

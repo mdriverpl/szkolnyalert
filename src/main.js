@@ -6,7 +6,7 @@ import './style.css';
 import './interface.css';
 import './teacher-panel.css';
 import './landing.css';
-const teacherRoute = window.location.pathname === '/nauczyciel' || window.location.pathname.startsWith('/nauczyciel/');
+const teacherRoute = window.location.pathname === '/n' || window.location.pathname === '/nauczyciel' || window.location.pathname.startsWith('/nauczyciel/');
 if (teacherRoute) {
   document.querySelector('link[rel="manifest"]').href = '/teacher.webmanifest';
   document.title = 'Szkolny Alert • Panel nauczyciela';

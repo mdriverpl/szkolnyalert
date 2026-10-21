@@ -115,12 +115,12 @@ async function refresh() {
 }
 async function initialize() {
   loading.value = true; error.value = '';
-  const key = accessKey.value.trim() || new URLSearchParams(window.location.hash.slice(1)).get('klucz') || savedKey();
+  const key = accessKey.value.trim() || (window.location.pathname === '/n' ? window.location.hash.slice(1) : new URLSearchParams(window.location.hash.slice(1)).get('klucz')) || savedKey();
   try {
     if (key) {
       await api('/access', { method: 'POST', body: JSON.stringify({ key }) });
       rememberKey(key);
-      window.history.replaceState(null, '', window.location.pathname);
+      window.history.replaceState(null, '', '/nauczyciel');
       accessKey.value = ''; needsKey.value = false;
     }
     await refresh();

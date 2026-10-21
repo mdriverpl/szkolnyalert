@@ -18,7 +18,7 @@ test('personal panel launches an alert, shows its procedure immediately, and nev
   const adminCookie = login.headers.get('set-cookie').split(';')[0];
   const admin = (path, method = 'POST') => originalFetch(base + '/api' + path, { method, headers: { Cookie: adminCookie, 'Content-Type': 'application/json' } });
   const access = await (await admin('/teachers/teacher-1/panel-key')).json();
-  const window = new Window({ url: base + access.path });
+  const window = new Window({ url: base + '/n#' + access.key });
   const presenceCalls = [];
   Object.defineProperty(window.navigator, 'sendBeacon', { configurable: true, value: (url, body) => { presenceCalls.push({ url, body }); return true; } });
   let closeCalls = 0;
@@ -53,6 +53,7 @@ test('personal panel launches an alert, shows its procedure immediately, and nev
   };
   mount(); await waitFor(() => document.querySelector('.teacher-calm'));
   assert.equal(window.location.hash, '', 'access key is removed from the visible URL');
+  assert.equal(window.location.pathname, '/nauczyciel', 'compact SMS link becomes the canonical installable panel URL');
   assert.equal(window.localStorage.getItem('szkolnyalert.teacherKey'), access.key);
   assert.equal(document.querySelector('.teacher-main > .teacher-install')?.nextElementSibling?.className, 'teacher-push panel', 'installation and push controls appear at the top of the panel');
   const button = text => [...document.querySelectorAll('button')].find(x => x.textContent.includes(text));

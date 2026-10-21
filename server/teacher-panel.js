@@ -40,7 +40,7 @@ export function createTeacherPanel(store, { secure, rateLimit, launchIncident, v
   const cookieOptions = { httpOnly: true, secure, sameSite: 'strict', path: '/api/teacher-panel', maxAge: 30 * 86400_000 };
   router.post('/access', async (req, res) => {
     rateLimit(req, 'teacher-access', 300);
-    if (typeof req.body.key !== 'string' || !/^[a-f0-9]{64}$/.test(req.body.key)) throw fail('Nieprawidłowy klucz. Otwórz osobisty link otrzymany od szkoły.', 401);
+    if (typeof req.body.key !== 'string' || !/^(?:[a-f0-9]{64}|[A-Za-z0-9_-]{43})$/.test(req.body.key)) throw fail('Nieprawidłowy klucz. Otwórz osobisty link otrzymany od szkoły.', 401);
     const keyHash = hash(req.body.key), token = randomBytes(32).toString('hex');
     const oldToken = readCookie(req);
     await store.mutate(data => {

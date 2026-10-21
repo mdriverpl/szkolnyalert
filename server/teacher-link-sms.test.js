@@ -42,7 +42,7 @@ test('bulk confirmation counts only unique valid phones in one school; preview s
   const data = await f.store.read();
   assert.equal(data.teacherKeys.length, 3);
   assert.equal(data.teacherKeys[0].keyHash, 'old-key');
-  for (const call of f.calls) assert.equal(JSON.stringify(data).includes(call.link.split('=')[1]), false);
+  for (const call of f.calls) assert.equal(JSON.stringify(data).includes(call.link.split('#')[1]), false);
   assert.equal((await f.send(p)).accepted, 2); assert.equal(f.calls.length, 2);
 });
 
@@ -89,7 +89,7 @@ test('single-teacher batches send only to the selected teacher and cannot be wid
   });
   assert.equal(result.accepted, 1);
   assert.equal(f.calls.length, 1); assert.equal(f.calls[0].phone, '48500600702');
-  assert.ok(f.calls[0].link.startsWith('https://school.example/nauczyciel#klucz='));
+  assert.ok(f.calls[0].link.startsWith('https://school.example/n#'));
   const keys = (await f.store.read()).teacherKeys;
   assert.equal(keys.length, 2); assert.equal(keys[0].keyHash, 'old-key'); assert.equal(keys[1].teacherId, 'b');
   await f.send(p); assert.equal(f.calls.length, 1, 'a batch is never sent twice');
