@@ -6,7 +6,7 @@ import { addProcedureTemplates } from './procedure-templates.js';
 import { addAlertTemplates } from './alert-templates.js';
 import { previewTeacherCsv } from './teacher-csv.js';
 import { createSmsGateway, smsSummary } from './smsapi.js';
-import { createTeacherPanel } from './teacher-panel.js';
+import { createTeacherPanel, teacherDeliveryStatus } from './teacher-panel.js';
 import { createTeacherLinkSms } from './teacher-link-sms.js';
 import { createPushGateway } from './push.js';
 
@@ -151,7 +151,7 @@ export function createApp(store, options = {}) {
     const data = await store.read();
     const result = { schools: data.schools.filter(x => x.id === req.schoolId) };
     for (const type of ['teachers', 'procedures', 'alerts', 'incidents']) result[type] = data[type].filter(x => x.schoolId === req.schoolId);
-    if (['admin', 'superadmin'].includes(req.user.role)) result.teachers = result.teachers.map(teacher => ({ ...teacher, hasPanelKey: !!data.teacherKeys?.some(x => x.teacherId === teacher.id && x.schoolId === req.schoolId) }));
+    if (['admin', 'superadmin'].includes(req.user.role)) result.teachers = result.teachers.map(teacher => ({ ...teacher, ...teacherDeliveryStatus(data, teacher, push.config()), hasPanelKey: !!data.teacherKeys?.some(x => x.teacherId === teacher.id && x.schoolId === req.schoolId) }));
     result.users = ['admin', 'superadmin'].includes(req.user.role) ? data.users.filter(x => x.schoolId === req.schoolId && x.role !== 'superadmin').map(publicUser) : [];
     if (req.user.role === 'superadmin') { result.availableSchools = data.schools; result.selectedSchoolId = req.schoolId; }
     const gateway = smsSummary(data.smsSettings?.find(x => x.schoolId === req.schoolId));

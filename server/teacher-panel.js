@@ -10,6 +10,15 @@ const ownTeacher = (data, teacherId, schoolId) => {
   return teacher;
 };
 
+export function teacherDeliveryStatus(data, teacher, pushConfig, now = Date.now()) {
+  const keys = new Set((data.teacherKeys || []).filter(x => x.teacherId === teacher.id && x.schoolId === teacher.schoolId).map(x => x.keyHash));
+  const matches = x => x.teacherId === teacher.id && x.schoolId === teacher.schoolId && keys.has(x.keyHash);
+  return {
+    notificationsEnabled: !!pushConfig.enabled && (data.pushSubscriptions || []).some(x => matches(x) && x.publicKey === pushConfig.publicKey),
+    online: (data.teacherSessions || []).some(x => matches(x) && x.expires > now && x.lastSeen > now - 45_000 && x.lastSeen <= now)
+  };
+}
+
 export function createTeacherPanel(store, { secure, rateLimit, launchIncident, vault, push }) {
   async function prepareKey(schoolId) {
     const key = randomBytes(32).toString('hex');
@@ -53,7 +62,21 @@ export function createTeacherPanel(store, { secure, rateLimit, launchIncident, v
     if (!teacher) throw fail('Dostęp nauczyciela został unieważniony.', 401);
     req.panelTeacher = teacher; req.panelSchoolId = session.schoolId; req.panelTokenHash = session.tokenHash; req.panelKeyHash = session.keyHash; next();
   });
+  router.post('/presence', async (req, res) => {
+    if (req.body?.active !== false) throw fail('Nieprawidłowy status aktywności.');
+    await store.mutate(data => {
+      const session = data.teacherSessions?.find(x => x.tokenHash === req.panelTokenHash);
+      if (session) session.lastSeen = 0;
+    });
+    res.json({ ok: true });
+  });
   router.get('/state', async (req, res) => {
+    const now = Date.now();
+    const current = (await store.read()).teacherSessions?.find(x => x.tokenHash === req.panelTokenHash);
+    if (!current?.lastSeen || current.lastSeen < now - 15_000) await store.mutate(data => {
+      const session = data.teacherSessions?.find(x => x.tokenHash === req.panelTokenHash);
+      if (session) session.lastSeen = now;
+    });
     const data = await store.read(), schoolId = req.panelSchoolId;
     const teacher = ownTeacher(data, req.panelTeacher.id, schoolId);
     const school = data.schools.find(x => x.id === schoolId);

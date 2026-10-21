@@ -278,5 +278,3 @@ footer { color: #929eb0; }
 .superadmin-school-switch select { max-width: min(420px, 50vw); padding: 8px 28px 8px 10px; font-size: 12px; }
 .test-alert-badge { display: inline-flex; background: #f8ecd5; color: #916c29; margin: 8px 0; }
 .test-alert-notice { padding: 12px 15px; border: 1px solid #ebd8ad; border-radius: 8px; background: #fcf6e9; color: #8b692f; font-size: 11px; line-height: 1.8; margin-bottom: 16px; }
-.teacher-test-alert { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 7px 9px; border: 1px solid #ffa9b4; border-radius: 7px; color: #9f3552; background: #fff2f5; font-size: 8px; font-weight: 750; letter-spacing: .6px; }
-.teacher-test-alert:hover { background: #ffe4eb; }

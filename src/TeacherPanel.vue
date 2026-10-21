@@ -1,11 +1,13 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { ShieldCheck, ShieldAlert, Radio, MapPin, Clock3, Download, WifiOff, CheckCircle2, X, ArrowRight, LogOut, KeyRound, LoaderCircle, Bell } from 'lucide-vue-next';
+import { ShieldCheck, ShieldAlert, Radio, MapPin, Clock3, Download, WifiOff, CheckCircle2, X, ArrowRight, KeyRound, LoaderCircle, Bell } from 'lucide-vue-next';
 
 const data = ref(null), loading = ref(true), connected = ref(false), needsKey = ref(false), error = ref(''), accessKey = ref('');
 const launchOpen = ref(false), selectedAlert = ref(''), location = ref(''), sending = ref(false), launchError = ref('');
 const sendSms = ref(false);
 const installHelp = ref(false), installPrompt = ref(null), standalone = ref(false);
+const samsungInternet = /SamsungBrowser\//i.test(navigator.userAgent);
+const panelClosed = ref(false);
 const pushStatus = ref('checking'), pushBusy = ref(false), pushMessage = ref('');
 let pushRegistration, pushSubscription, pushPublicKey;
 const pushSupported = () => window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
@@ -48,23 +50,25 @@ async function enablePush() {
   } catch { pushStatus.value = 'ready'; pushMessage.value = 'Nie udało się włączyć powiadomień. Sprawdź zgodę w ustawieniach telefonu i spróbuj ponownie.'; }
   finally { pushBusy.value = false; }
 }
-async function disablePush() {
-  if (!pushSubscription) return;
-  pushBusy.value = true; pushMessage.value = '';
-  try {
-    await api('/push', { method: 'DELETE', body: JSON.stringify({ endpoint: pushSubscription.endpoint }) });
-    await pushSubscription.unsubscribe(); pushSubscription = null; pushStatus.value = 'ready';
-  } catch { pushMessage.value = 'Nie udało się wyłączyć powiadomień. Spróbuj ponownie.'; }
-  finally { pushBusy.value = false; }
+function pushWorkerMessage(event) {
+  if (event.data?.type === 'refresh-alerts') {
+    if (panelClosed.value) reopenPanel();
+    else if (data.value) refresh();
+  }
 }
-async function testPush() {
-  if (!pushSubscription || pushBusy.value) return;
-  pushBusy.value = true;
-  try { const result = await api('/push/test', { method: 'POST', body: JSON.stringify({ endpoint: pushSubscription.endpoint }) }); pushMessage.value = result.message; }
-  catch (e) { pushMessage.value = e.message; }
-  finally { pushBusy.value = false; }
+function leavePresence() {
+  if (!data.value) return;
+  try { navigator.sendBeacon?.('/api/teacher-panel/presence', new Blob([JSON.stringify({ active: false })], { type: 'application/json' })); }
+  catch { /* Presence expires automatically if the browser cannot send the signal. */ }
 }
-function pushWorkerMessage(event) { if (event.data?.type === 'refresh-alerts' && data.value) refresh(); }
+function closePanel() {
+  if (sending.value || pushBusy.value) return;
+  leavePresence();
+  panelClosed.value = true; launchOpen.value = false; requestVersion++;
+  // Browsers may refuse to close a window they did not open. Keep a safe fallback.
+  try { window.close(); } catch { /* The closed-panel screen remains visible. */ }
+}
+function reopenPanel() { panelClosed.value = false; initialize(); }
 const launchDialog = ref(null);
 let previousFocus;
 watch(launchOpen, async open => {
@@ -139,21 +143,17 @@ async function launch() {
   } catch (e) { launchError.value = e.status ? e.message : 'Nie udało się potwierdzić uruchomienia. Odśwież panel i sprawdź aktywne alerty przed kolejną próbą.'; await refresh(); }
   finally { sending.value = false; }
 }
-async function logout() {
-  rememberKey('');
-  try { await api('/logout', { method: 'POST', body: JSON.stringify({ endpoint: pushSubscription?.endpoint }) }); await pushSubscription?.unsubscribe().catch(() => {}); pushSubscription = null; pushStatus.value = 'ready'; data.value = null; needsKey.value = true; connected.value = false; }
-  catch (e) { error.value = e.message; }
-}
 function captureInstall(event) { event.preventDefault(); installPrompt.value = event; }
 function installed() { standalone.value = true; installPrompt.value = null; installHelp.value = false; }
 async function install() {
+  if (samsungInternet) { installHelp.value = true; return; }
   if (!installPrompt.value) { installHelp.value = !installHelp.value; return; }
   await installPrompt.value.prompt();
   const choice = await installPrompt.value.userChoice;
   if (choice.outcome === 'accepted') installed();
   installPrompt.value = null;
 }
-function resume() { if (document.visibilityState !== 'hidden') { if (data.value) refresh(); else if (!needsKey.value) initialize(); } }
+function resume() { if (document.visibilityState === 'hidden') leavePresence(); if (!panelClosed.value && document.visibilityState !== 'hidden') { if (data.value) refresh(); else if (!needsKey.value) initialize(); } }
 function offline() { connected.value = false; error.value = 'Brak internetu. Wyświetlane dane mogą być nieaktualne. Uruchamianie alertów jest niedostępne.'; }
 function escape(event) {
   if (event.key === 'Escape' && !sending.value) launchOpen.value = false;
@@ -168,7 +168,8 @@ onMounted(() => {
   navigator.serviceWorker?.addEventListener('message', pushWorkerMessage);
   standalone.value = window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
   initialize();
-  interval = setInterval(() => { if (data.value && !needsKey.value && document.visibilityState !== 'hidden') refresh(); }, 3000);
+  interval = setInterval(() => { if (!panelClosed.value && data.value && !needsKey.value && document.visibilityState !== 'hidden') refresh(); }, 3000);
+  window.addEventListener('pagehide', leavePresence);
   window.addEventListener('online', resume); window.addEventListener('offline', offline);
   document.addEventListener('visibilitychange', resume); window.addEventListener('beforeinstallprompt', captureInstall);
   window.addEventListener('appinstalled', installed); window.addEventListener('keydown', escape);
@@ -176,6 +177,8 @@ onMounted(() => {
 onUnmounted(() => {
   navigator.serviceWorker?.removeEventListener('message', pushWorkerMessage);
   clearInterval(interval); requestVersion++;
+  window.removeEventListener('pagehide', leavePresence);
+  leavePresence();
   window.removeEventListener('online', resume); window.removeEventListener('offline', offline); document.removeEventListener('visibilitychange', resume);
   window.removeEventListener('beforeinstallprompt', captureInstall); window.removeEventListener('appinstalled', installed); window.removeEventListener('keydown', escape);
 });
@@ -183,14 +186,16 @@ onUnmounted(() => {
 
 <template>
   <div class="teacher-app">
-    <header class="teacher-header"><a class="brand" href="/nauczyciel"><ShieldCheck :size="27"/><span>szkolny<span class="brand-light">alert</span><small>OSOBISTY PANEL NAUCZYCIELA</small></span></a><button v-if="data" class="teacher-logout" aria-label="Wyloguj panel nauczyciela" @click="logout"><LogOut :size="19"/></button></header>
+    <header class="teacher-header"><a class="brand" href="/nauczyciel"><ShieldCheck :size="27"/><span>szkolny<span class="brand-light">alert</span><small>OSOBISTY PANEL NAUCZYCIELA</small></span></a><button v-if="!panelClosed && data" class="teacher-close" :disabled="sending || pushBusy" aria-label="Zamknij panel bez wylogowania" @click="closePanel"><X :size="18"/><span>Zamknij</span></button></header>
     <main class="teacher-main">
-      <div v-if="loading" class="teacher-loading"><LoaderCircle class="spin" :size="30"/><p>Otwieranie Twojego panelu…</p></div>
+      <section v-if="panelClosed" class="teacher-closed panel"><ShieldCheck :size="36"/><h1>Panel zamknięty.</h1><p>Możesz zamknąć to okno lub wrócić do panelu. Twój klucz pozostaje zapisany na tym urządzeniu. Włączone powiadomienia nadal działają.</p><button class="btn primary" @click="reopenPanel">Otwórz panel <ArrowRight :size="17"/></button></section>
+      <div v-else-if="loading" class="teacher-loading"><LoaderCircle class="spin" :size="30"/><p>Otwieranie Twojego panelu…</p></div>
       <section v-else-if="!data" class="teacher-access panel"><KeyRound :size="35"/><h1>Twój osobisty panel.</h1><p>Otwórz link otrzymany od szkoły albo wpisz swój klucz dostępu.</p><p v-if="error" class="error" role="alert">{{ error }}</p><form @submit.prevent="initialize"><label>Klucz nauczyciela<input v-model="accessKey" type="password" required maxlength="64" autocomplete="off" spellcheck="false" placeholder="Klucz z linku od szkoły"></label><button class="btn primary full">Otwórz mój panel <ArrowRight :size="17"/></button></form><button v-if="!needsKey" class="text-link" @click="initialize">Spróbuj połączyć ponownie</button></section>
       <template v-else>
         <p v-if="standalone" class="teacher-installed-note"><CheckCircle2 :size="14"/>Aplikacja zainstalowana</p>
-        <section v-else class="teacher-install"><div><Download :size="22"/><span><strong>Miej swój panel zawsze pod ręką</strong><small>Klucz zapamiętujemy na tym urządzeniu. Twój link jest osobisty — nie przekazuj go innym.</small></span></div><button class="btn secondary" @click="install">Zainstaluj aplikację</button><div v-if="installHelp" class="teacher-install-help"><p><strong>Android:</strong> w menu przeglądarki wybierz „Zainstaluj aplikację” lub „Dodaj do ekranu głównego”.</p><p><strong>iPhone:</strong> otwórz link w Safari → Udostępnij → Do ekranu początkowego.</p><p>Instalacja na telefonie wymaga udostępnienia aplikacji przez HTTPS.</p></div></section>
-        <section class="teacher-push panel" aria-label="Powiadomienia telefonu"><div class="teacher-push-heading"><Bell :size="21"/><div><strong>{{ pushStatus === 'subscribed' ? 'Powiadomienia włączone' : 'Powiadomienia na telefonie' }}</strong><p>Ogólny komunikat o alercie, także przy zamkniętej aplikacji. Szczegóły zobaczysz po jej otwarciu.</p></div></div><button v-if="pushStatus === 'ready'" class="btn primary" :disabled="pushBusy || !connected" @click="enablePush">Włącz powiadomienia</button><template v-if="pushStatus === 'subscribed'"><button class="btn secondary" :disabled="pushBusy || !connected" @click="testPush">Wyślij test na ten telefon</button><button class="text-link" :disabled="pushBusy" @click="disablePush">Wyłącz powiadomienia</button></template><p v-if="pushStatus === 'denied'" class="teacher-push-help">Powiadomienia są zablokowane. Włącz je w ustawieniach telefonu lub przeglądarki dla Szkolnego Alertu, a potem otwórz aplikację ponownie.</p><p v-if="pushStatus === 'unsupported'" class="teacher-push-help">Na iPhonie otwórz aplikację z ikony na ekranie głównym (iOS 16.4 lub nowszy). Na Androidzie użyj aktualnej przeglądarki Chrome. Wymagane jest HTTPS.</p><p v-if="pushStatus === 'unconfigured'" class="teacher-push-help">Administrator musi skonfigurować powiadomienia na serwerze.</p><button v-if="['loading-worker', 'error'].includes(pushStatus)" class="text-link" :disabled="pushBusy" @click="loadPush">Sprawdź gotowość powiadomień</button><p v-if="pushStatus === 'loading-worker'" class="teacher-push-help">Trwa przygotowanie aplikacji. Odśwież ją lub sprawdź gotowość ponownie.</p><p v-if="pushMessage" class="teacher-push-help" role="status">{{ pushMessage }}</p></section>
+        <section v-else class="teacher-install"><div><Download :size="22"/><span><strong>Miej swój panel zawsze pod ręką</strong><small>Klucz zapamiętujemy na tym urządzeniu. Twój link jest osobisty — nie przekazuj go innym.</small></span></div><button class="btn secondary" @click="install">Zainstaluj aplikację</button><div v-if="installHelp || samsungInternet" class="teacher-install-help"><p v-if="samsungInternet"><strong>Samsung Internet:</strong> jeśli Play Protect blokuje instalację komunikatem o starszej wersji Androida, otwórz pełny osobisty link z SMS-a w aktualnym Google Chrome. W menu Chrome wybierz „Dodaj do ekranu głównego” → „Zainstaluj”. Chrome zapamięta klucz po otwarciu tego linku. Po instalacji włącz powiadomienia w aplikacji.</p><p v-else><strong>Android:</strong> w aktualnym Google Chrome otwórz swój osobisty link, a następnie w menu wybierz „Zainstaluj aplikację” lub „Dodaj do ekranu głównego”.</p><p><strong>iPhone:</strong> otwórz link w Safari → Udostępnij → Do ekranu początkowego.</p><p>Instalacja na telefonie wymaga udostępnienia aplikacji przez HTTPS.</p></div></section>
+        <p v-if="pushStatus === 'subscribed'" class="teacher-push-enabled" role="status"><CheckCircle2 :size="14"/>Powiadomienia włączone</p>
+        <section v-else class="teacher-push panel" aria-label="Powiadomienia telefonu"><div class="teacher-push-heading"><Bell :size="21"/><div><strong>Powiadomienia na telefonie</strong><p>Ogólny komunikat o alercie, także przy zamkniętej aplikacji. Szczegóły zobaczysz po jej otwarciu.</p></div></div><button v-if="pushStatus === 'ready'" class="btn primary" :disabled="pushBusy || !connected" @click="enablePush">Włącz powiadomienia</button><p v-if="pushStatus === 'denied'" class="teacher-push-help">Powiadomienia są zablokowane. Włącz je w ustawieniach telefonu lub przeglądarki dla Szkolnego Alertu, a potem otwórz aplikację ponownie.</p><p v-if="pushStatus === 'unsupported'" class="teacher-push-help">Na iPhonie otwórz aplikację z ikony na ekranie głównym (iOS 16.4 lub nowszy). Na Androidzie użyj aktualnej przeglądarki Chrome. Wymagane jest HTTPS.</p><p v-if="pushStatus === 'unconfigured'" class="teacher-push-help">Administrator musi skonfigurować powiadomienia na serwerze.</p><button v-if="['loading-worker', 'error'].includes(pushStatus)" class="text-link" :disabled="pushBusy" @click="loadPush">Sprawdź gotowość powiadomień</button><p v-if="pushStatus === 'loading-worker'" class="teacher-push-help">Trwa przygotowanie aplikacji. Odśwież ją lub sprawdź gotowość ponownie.</p><p v-if="pushMessage" class="teacher-push-help" role="status">{{ pushMessage }}</p></section>
         <section class="teacher-identity"><span class="eyebrow">{{ data.school.name }}</span><h1>{{ data.teacher.name }}</h1><p>{{ data.teacher.subject }}</p><div class="teacher-connection"><span :class="['status-dot', { orange: !connected }]"></span>{{ connected ? 'Połączono ze szkołą' : 'Brak aktualnego połączenia' }}<span v-if="data.checkedAt">· {{ date(data.checkedAt) }}</span></div></section>
         <div v-if="!connected" class="teacher-offline" role="alert"><WifiOff :size="22"/><div><strong>Dane mogą być nieaktualne</strong><p>{{ error }}</p><button class="text-link" @click="refresh">Sprawdź połączenie</button></div></div>
         <div v-if="active.length" class="teacher-alerts">

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from './app.js';
 import { createStore } from './store.js';
+import { teacherDeliveryStatus } from './teacher-panel.js';
 
 async function fixture(t) {
   const store = await createStore({ memory: true });
@@ -112,4 +113,46 @@ test('teacher sessions are separate from admin sessions and deletion immediately
   assert.equal((await browser('/teachers/teacher-2', 'DELETE')).status, 200);
   assert.equal((await browser('/teacher-panel/state')).status, 401);
   assert.equal((await browser('/teacher-panel/access', 'POST', { key: access.key })).status, 401);
+});
+
+
+test('teacher list tracks authenticated panel presence, independent of notification registration', async t => {
+  const { store, client } = await fixture(t);
+  const admin = client(), panel = client(), anonymous = client();
+  await login(admin);
+  const access = (await admin('/teachers/teacher-1/panel-key', 'POST')).body;
+  const status = async () => (await admin('/state')).body.teachers.find(x => x.id === 'teacher-1');
+  assert.equal((await status()).online, false);
+  assert.equal((await anonymous('/teacher-panel/presence', 'POST', { active: false })).status, 401);
+  await panel('/teacher-panel/access', 'POST', { key: access.key });
+  await panel('/teacher-panel/state');
+  assert.equal((await status()).online, true);
+  assert.equal((await status()).notificationsEnabled, false);
+  await panel('/teacher-panel/presence', 'POST', { active: false });
+  assert.equal((await status()).online, false);
+  await panel('/teacher-panel/state');
+  assert.equal((await status()).online, true);
+  await store.mutate(data => { data.teacherSessions.forEach(x => { x.lastSeen = Date.now() - 46_000; }); });
+  assert.equal((await status()).online, false);
+  await panel('/teacher-panel/state');
+  await admin('/teachers/teacher-1/panel-key', 'DELETE');
+  assert.equal((await status()).online, false);
+});
+
+test('delivery badges ignore other schools, expired sessions, revoked keys and obsolete push keys', () => {
+  const teacher = { id: 't1', schoolId: 's1' }, now = 100_000;
+  const row = { teacherId: 't1', schoolId: 's1', keyHash: 'key1' };
+  const data = { teacherKeys: [row], teacherSessions: [{ ...row, lastSeen: now, expires: now + 1000 }], pushSubscriptions: [{ ...row, publicKey: 'vapid1' }] };
+  const config = { enabled: true, publicKey: 'vapid1' };
+  assert.deepEqual(teacherDeliveryStatus(data, teacher, config, now), { online: true, notificationsEnabled: true });
+  data.teacherSessions.push({ ...row, lastSeen: 0, expires: now + 1000 });
+  assert.equal(teacherDeliveryStatus(data, teacher, config, now).online, true, 'one open device is enough');
+  data.teacherSessions[0].expires = now;
+  assert.equal(teacherDeliveryStatus(data, teacher, config, now).online, false);
+  assert.equal(teacherDeliveryStatus(data, teacher, { ...config, publicKey: 'rotated' }, now).notificationsEnabled, false);
+  assert.equal(teacherDeliveryStatus(data, teacher, { ...config, enabled: false }, now).notificationsEnabled, false);
+  data.pushSubscriptions[0].schoolId = 's2';
+  assert.equal(teacherDeliveryStatus(data, teacher, config, now).notificationsEnabled, false);
+  data.pushSubscriptions[0].schoolId = 's1'; data.teacherKeys = [];
+  assert.deepEqual(teacherDeliveryStatus(data, teacher, config, now), { online: false, notificationsEnabled: false });
 });
