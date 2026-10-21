@@ -163,6 +163,14 @@ export function createApp(store, options = {}) {
   app.post('/api/settings/sms/test', adminOnly, async (req, res) => { rateLimit(req, 'sms-test'); res.json(await sms.test(req.schoolId, req.body.phone)); });
   app.post('/api/schools', adminOnly, (_, res) => res.status(403).json({ error: 'Konto jest przypisane do jednej szkoły. Nową szkołę dodaj na ekranie startowym z osobnym kontem administratora.' }));
   const teacherLinkSms = createTeacherLinkSms(store, sms);
+  app.post('/api/teachers/:id/push-test/preview', adminOnly, async (req, res) => {
+    rateLimit(req, 'teacher-push-preview', 60);
+    res.json(await push.previewTeacherTest(req.schoolId, req.params.id, req.user.id));
+  });
+  app.post('/api/teachers/:id/push-test/send', adminOnly, async (req, res) => {
+    rateLimit(req, 'teacher-push-send');
+    res.json(await push.sendTeacherTest(req.schoolId, req.params.id, req.user.id, req.body));
+  });
   app.post('/api/teachers/link-sms/preview', adminOnly, async (req, res) => res.json(await teacherLinkSms.preview(req.schoolId, req.user.id, `${req.protocol}://${req.get('host')}`, req.body?.teacherId ?? null)));
   app.post('/api/teachers/link-sms/send', adminOnly, async (req, res) => res.json(await teacherLinkSms.send(req.schoolId, req.user.id, `${req.protocol}://${req.get('host')}`, req.body)));
   app.post('/api/teachers/:id/panel-key', adminOnly, teacherPanel.generate);

@@ -157,6 +157,12 @@ test('register a school without previous login, create its teacher account, and 
   assert.equal(document.querySelector('.modal input[type="tel"]').value, '+48 500 600 710');
   await fill(['Anna Testowa', 'anna.test@example.com', '+48 500 600 711', 'Matematyka']); submit();
   await waitFor(() => !document.querySelector('.modal') && document.querySelector('a[href="tel:+48500600711"]'));
+  document.querySelector('[aria-label="Wyślij alert testowy: Anna Testowa"]').click();
+  await waitFor(() => document.querySelector('.modal')?.textContent.includes('Aktywne urządzenia nauczyciela:'));
+  assert.ok(document.querySelector('.modal').textContent.includes('Anna Testowa'));
+  assert.equal(button('Wyślij alert testowy').disabled, true, 'sending requires an enabled teacher device');
+  assert.equal(smsCalls, 1, 'opening a push test never sends SMS');
+  button('Anuluj').click(); await nextTick();
   document.querySelector('[aria-label="Panel nauczyciela: Anna Testowa"]').click();
   await waitFor(() => document.querySelector('.teacher-access-admin'));
   await waitFor(() => document.querySelector('.teacher-link-value'));
@@ -228,6 +234,7 @@ test('register a school without previous login, create its teacher account, and 
   assert.equal(button('Import CSV'), undefined);
   assert.equal(button('Wyślij linki do wszystkich'), undefined);
   assert.equal(document.querySelector('.teacher-link-sms'), null);
+  assert.equal(document.querySelector('.teacher-test-alert'), null);
   document.querySelector('[aria-label="Wyloguj"]').click(); await waitFor(() => document.querySelector('.login-page'));
   button('Dodaj szkołę').click(); await waitFor(() => document.querySelector('.registration-form'));
   await fill(['Druga szkoła', 'piotr.admin', 'testowe-haslo-456'], '.registration-form input');

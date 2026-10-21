@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import webpush from 'web-push';
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -50,6 +50,40 @@ export function createPushGateway(store, { publicKey = process.env.VAPID_PUBLIC_
     const status = await deliver(row, { title: 'Szkolny Alert — test powiadomień', body: 'Powiadomienia są włączone. Otwórz aplikację, aby zobaczyć panel.', tag: 'szkolnyalert-test' });
     return { status, message: status === 'accepted' ? 'Usługa push przyjęła test. Sprawdź powiadomienia telefonu.' : 'Nie udało się wysłać testu. Włącz powiadomienia ponownie.' };
   }
+  function teacherTestSnapshot(data, schoolId, teacherId) {
+    if (!data.teachers.some(x => x.id === teacherId && x.schoolId === schoolId)) throw fail('Nie znaleziono nauczyciela.', 404);
+    const rows = (data.pushSubscriptions || []).filter(x => x.schoolId === schoolId && x.teacherId === teacherId && x.publicKey === publicKey && valid(data, x));
+    const fingerprint = createHash('sha256').update(JSON.stringify(rows)).digest('hex');
+    return { rows, fingerprint };
+  }
+  async function previewTeacherTest(schoolId, teacherId, userId) {
+    return store.mutate(data => {
+      const { rows, fingerprint } = teacherTestSnapshot(data, schoolId, teacherId);
+      const batchId = randomUUID(), expires = Date.now() + 10 * 60_000;
+      data.teacherPushTests = (data.teacherPushTests || []).filter(x => x.expires > Date.now() - 86400_000);
+      data.teacherPushTests.push({ batchId, schoolId, teacherId, userId, expires, fingerprint, status: 'preview' });
+      return { batchId, count: rows.length, canSend: configured && rows.length > 0, message: !configured ? 'Powiadomienia push nie są skonfigurowane na serwerze.' : !rows.length ? 'Ten nauczyciel nie ma aktywnych powiadomień. Musi otworzyć swój panel na telefonie i wybrać „Włącz powiadomienia”.' : 'Test otrzymają wyłącznie urządzenia tego nauczyciela z włączonymi powiadomieniami.' };
+    });
+  }
+  async function sendTeacherTest(schoolId, teacherId, userId, body) {
+    const job = await store.mutate(data => {
+      const batch = data.teacherPushTests?.find(x => x.batchId === body.batchId && x.schoolId === schoolId && x.teacherId === teacherId && x.userId === userId);
+      if (!batch) throw fail('Otwórz ponownie potwierdzenie testu.', 404);
+      if (body.confirmed !== true) throw fail('Potwierdź wysłanie alertu testowego.');
+      if (batch.status !== 'preview') return { existing: batch.result || { status: 'sending', message: 'Test został już rozpoczęty. Nie ponawiaj wysyłki.' } };
+      const current = teacherTestSnapshot(data, schoolId, teacherId);
+      if (batch.expires <= Date.now() || batch.fingerprint !== current.fingerprint || body.expectedCount !== current.rows.length) throw fail('Lista urządzeń zmieniła się lub potwierdzenie wygasło. Otwórz test ponownie.', 409);
+      if (!configured || !current.rows.length) throw fail('Nauczyciel musi najpierw włączyć powiadomienia na telefonie.');
+      batch.status = 'sending';
+      return { rows: current.rows, batchId: batch.batchId };
+    });
+    if (job.existing) return job.existing;
+    const results = await Promise.all(job.rows.map(row => deliver(row, { title: 'TEST — Szkolny Alert', body: 'Test powiadomień — otwórz aplikację.', tag: job.batchId })));
+    const accepted = results.filter(x => x === 'accepted').length;
+    const result = { status: accepted === results.length ? 'accepted' : accepted ? 'partial' : 'failed', total: results.length, accepted, failed: results.length - accepted, message: accepted ? 'Usługa push przyjęła alert testowy. Poproś nauczyciela o sprawdzenie telefonu; przyjęcie nie potwierdza wyświetlenia.' : 'Nie udało się wysłać testu. Nauczyciel powinien ponownie włączyć powiadomienia.' };
+    await store.mutate(data => { const batch = data.teacherPushTests?.find(x => x.batchId === job.batchId); if (batch) { batch.status = 'complete'; batch.result = result; } });
+    return result;
+  }
   async function notifyIncident(schoolId, incidentId) {
     const job = await store.mutate(data => {
       const incident = data.incidents.find(x => x.id === incidentId && x.schoolId === schoolId);
@@ -70,5 +104,5 @@ export function createPushGateway(store, { publicKey = process.env.VAPID_PUBLIC_
       if (incident) incident.push = { status: accepted === job.rows.length ? 'accepted' : accepted ? 'partial' : 'failed', total: job.rows.length, accepted, failed: job.rows.length - accepted };
     });
   }
-  return { config, subscribe, unsubscribe, test, notifyIncident };
+  return { config, subscribe, unsubscribe, test, previewTeacherTest, sendTeacherTest, notifyIncident };
 }

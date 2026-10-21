@@ -52,3 +52,29 @@ test('revoked access and expired endpoints stop receiving push; failures do not 
   await assert.rejects(push.subscribe(teacher, 'key-1', subscription('revoked')), { status: 401 });
   assert.equal(createPushGateway(store, { publicKey: '', privateKey: '' }).config().enabled, false);
 });
+
+test('individual teacher alert requires confirmation, sends only to that teacher and deduplicates repeats', async t => {
+  const calls = [];
+  const { store, push, teacher, other } = await setup(t, async (row, payload) => { calls.push({ row, payload: JSON.parse(payload) }); });
+  const initialIncidents = (await store.read()).incidents.length;
+  const empty = await push.previewTeacherTest(teacher.schoolId, teacher.id, 'admin');
+  assert.equal(empty.canSend, false); assert.equal(empty.count, 0);
+  await assert.rejects(push.previewTeacherTest(teacher.schoolId, other.id, 'admin'), { status: 404 });
+  await push.subscribe(teacher, 'key-1', subscription('one'));
+  await push.subscribe(other, 'key-9', subscription('other'));
+  const preview = await push.previewTeacherTest(teacher.schoolId, teacher.id, 'admin');
+  assert.equal(preview.count, 1); assert.equal(calls.length, 0);
+  const body = { batchId: preview.batchId, expectedCount: 1, confirmed: true };
+  await assert.rejects(push.sendTeacherTest(teacher.schoolId, teacher.id, 'other-admin', body), { status: 404 });
+  await assert.rejects(push.sendTeacherTest(teacher.schoolId, teacher.id, 'admin', { ...body, confirmed: false }), { status: 400 });
+  const [first, repeat] = await Promise.all([push.sendTeacherTest(teacher.schoolId, teacher.id, 'admin', body), push.sendTeacherTest(teacher.schoolId, teacher.id, 'admin', body)]);
+  assert.equal(first.accepted, 1); assert.ok(['sending', 'accepted'].includes(repeat.status));
+  await push.sendTeacherTest(teacher.schoolId, teacher.id, 'admin', body);
+  assert.equal(calls.length, 1); assert.equal(calls[0].row.endpoint, subscription('one').endpoint);
+  assert.equal(calls[0].payload.title, 'TEST — Szkolny Alert');
+  assert.equal(calls[0].payload.body, 'Test powiadomień — otwórz aplikację.');
+  assert.equal((await store.read()).incidents.length, initialIncidents, 'testing never creates a school-wide incident');
+  const stale = await push.previewTeacherTest(teacher.schoolId, teacher.id, 'admin');
+  await push.unsubscribe(teacher, subscription('one').endpoint);
+  await assert.rejects(push.sendTeacherTest(teacher.schoolId, teacher.id, 'admin', { ...body, batchId: stale.batchId }), { status: 409 });
+});
