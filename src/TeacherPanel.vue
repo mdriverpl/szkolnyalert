@@ -5,6 +5,7 @@ import { ShieldCheck, ShieldAlert, Radio, MapPin, Clock3, Download, WifiOff, Che
 const data = ref(null), loading = ref(true), connected = ref(false), needsKey = ref(false), error = ref(''), accessKey = ref('');
 const launchOpen = ref(false), selectedAlert = ref(''), location = ref(''), sending = ref(false), launchError = ref('');
 const sendSms = ref(false);
+const resolveTarget = ref(null), resolveError = ref(''), resolveReason = ref('');
 const installHelp = ref(false), installPrompt = ref(null), standalone = ref(false);
 const samsungInternet = /SamsungBrowser\//i.test(navigator.userAgent);
 const panelClosed = ref(false);
@@ -71,8 +72,8 @@ function closePanel() {
 function reopenPanel() { panelClosed.value = false; initialize(); }
 const launchDialog = ref(null);
 let previousFocus;
-watch(launchOpen, async open => {
-  if (open) { previousFocus = document.activeElement; await nextTick(); launchDialog.value?.querySelector('select')?.focus(); }
+watch(() => launchOpen.value || !!resolveTarget.value, async open => {
+  if (open) { previousFocus = document.activeElement; await nextTick(); launchDialog.value?.querySelector('select, textarea')?.focus(); }
   else previousFocus?.focus();
 });
 const active = computed(() => [...(data.value?.incidents || [])].sort((a,b) => Number(!!a.isTest) - Number(!!b.isTest) || (a.severity === 'critical' ? 0 : 1) - (b.severity === 'critical' ? 0 : 1) || b.createdAt.localeCompare(a.createdAt)));
@@ -94,7 +95,7 @@ async function api(path, options = {}) {
   const response = await fetch('/api/teacher-panel' + path, { ...options, headers: { 'Content-Type': 'application/json', ...options.headers }, signal: AbortSignal.timeout(12000) });
   const result = await response.json();
   if (!response.ok) {
-    if (response.status === 401) { needsKey.value = true; data.value = null; launchOpen.value = false; if (path === '/access') rememberKey(''); }
+    if (response.status === 401) { needsKey.value = true; data.value = null; launchOpen.value = false; resolveTarget.value = null; if (path === '/access') rememberKey(''); }
     throw Object.assign(new Error(result.error || 'Nie udało się wykonać operacji.'), { status: response.status });
   }
   return result;
@@ -143,6 +144,24 @@ async function launch() {
   } catch (e) { launchError.value = e.status ? e.message : 'Nie udało się potwierdzić uruchomienia. Odśwież panel i sprawdź aktywne alerty przed kolejną próbą.'; await refresh(); }
   finally { sending.value = false; }
 }
+function openResolve(event) {
+  resolveError.value = ''; resolveReason.value = ''; resolveTarget.value = event;
+}
+async function resolveIncident() {
+  if (!connected.value || sending.value || !resolveTarget.value) return;
+  if (!resolveReason.value.trim() || resolveReason.value.length > 1000) { resolveError.value = 'Podaj powód odwołania alarmu (maks. 1000 znaków).'; return; }
+  sending.value = true; resolveError.value = '';
+  try {
+    const event = await api(`/incidents/${resolveTarget.value.id}/resolve`, { method: 'POST', body: JSON.stringify({ reason: resolveReason.value }) });
+    requestVersion++;
+    if (data.value) data.value.incidents = data.value.incidents.filter(x => x.id !== event.id);
+    resolveTarget.value = null;
+    await refresh();
+  } catch (e) {
+    resolveError.value = e.status ? e.message : 'Nie udało się potwierdzić odwołania. Sprawdź aktualny stan alarmu.';
+    await refresh();
+  } finally { sending.value = false; }
+}
 function captureInstall(event) { event.preventDefault(); installPrompt.value = event; }
 function installed() { standalone.value = true; installPrompt.value = null; installHelp.value = false; }
 async function install() {
@@ -156,9 +175,9 @@ async function install() {
 function resume() { if (document.visibilityState === 'hidden') leavePresence(); if (!panelClosed.value && document.visibilityState !== 'hidden') { if (data.value) refresh(); else if (!needsKey.value) initialize(); } }
 function offline() { connected.value = false; error.value = 'Brak internetu. Wyświetlane dane mogą być nieaktualne. Uruchamianie alertów jest niedostępne.'; }
 function escape(event) {
-  if (event.key === 'Escape' && !sending.value) launchOpen.value = false;
-  if (event.key === 'Tab' && launchOpen.value && launchDialog.value) {
-    const fields = [...launchDialog.value.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled)')];
+  if (event.key === 'Escape' && !sending.value) { launchOpen.value = false; resolveTarget.value = null; }
+  if (event.key === 'Tab' && (launchOpen.value || resolveTarget.value) && launchDialog.value) {
+    const fields = [...launchDialog.value.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled)')];
     const first = fields[0], last = fields.at(-1);
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
@@ -204,7 +223,8 @@ onUnmounted(() => {
             <p v-if="event.isTest" class="teacher-drill">ALERT TESTOWY · ĆWICZENIE SYSTEMU</p><p v-if="event.isDemo" class="teacher-drill">ĆWICZENIE · SCENARIUSZ DEMONSTRACYJNY</p>
             <div class="teacher-event-meta"><span><MapPin :size="16"/>{{ event.location }}</span><span><Clock3 :size="15"/>{{ date(event.createdAt) }}</span></div>
             <div v-if="event.procedure" class="teacher-safety-procedure"><span class="eyebrow">PROCEDURA BEZPIECZEŃSTWA</span><h3>{{ event.procedure.name }}</h3><p class="teacher-procedure-description">{{ event.procedure.description }}</p><ol><li v-for="(step, i) in event.procedure.steps" :key="i"><span>{{ i + 1 }}</span><p>{{ step }}</p></li></ol></div>
-            <p class="teacher-emergency-note">Postępuj zgodnie z procedurą szkoły i poleceniami koordynatora. Zakończenie alertu potwierdza administrator.</p>
+            <p class="teacher-emergency-note">Postępuj zgodnie z procedurą szkoły i poleceniami koordynatora. Alert może odwołać nauczyciel, który go uruchomił, lub administrator.</p>
+            <button v-if="event.createdByTeacherId === data.teacher.id" class="btn secondary teacher-resolve" :disabled="sending || !connected" @click="openResolve(event)"><CheckCircle2 :size="17"/>Odwołaj alarm</button>
           </article>
         </div>
         <section v-else :class="['teacher-calm panel', { stale: !connected }]"><CheckCircle2 :size="37"/><h2>{{ connected ? 'Brak aktywnych alertów' : 'Nie można potwierdzić bieżącego stanu' }}</h2><p>{{ connected ? 'Procedura bezpieczeństwa pojawi się tutaj automatycznie po uruchomieniu alertu w Twojej szkole.' : 'Ostatni odczyt nie zawierał aktywnych alertów. Odzyskaj połączenie, aby sprawdzić aktualną sytuację.' }}</p></section>
@@ -213,6 +233,20 @@ onUnmounted(() => {
       </template>
     </main>
     <footer class="teacher-footer">Szkolny Alert · Panel nauczyciela<span>Aktualizacja co 3 sekundy przy otwartym panelu</span></footer>
-    <div v-if="launchOpen" class="modal-backdrop" @click.self="!sending && (launchOpen = false)"><section ref="launchDialog" class="modal teacher-launch-modal" role="dialog" aria-modal="true" aria-labelledby="teacher-launch-title"><header><div><span class="eyebrow">POTWIERDZENIE ZDARZENIA</span><h2 id="teacher-launch-title">Uruchom alert w szkole</h2></div><button class="icon-button" aria-label="Zamknij" :disabled="sending" @click="launchOpen = false"><X :size="22"/></button></header><form @submit.prevent="launch"><label>Rodzaj alertu<select v-model="selectedAlert" required :disabled="sending"><option v-for="alert in availableAlerts" :key="alert.id" :value="alert.id">{{ alert.isTest ? '[TEST] ' + alert.name : alert.name }}</option></select></label><p v-if="availableAlerts.find(a => a.id === selectedAlert)?.isTest" class="test-alert-notice">ALERT TESTOWY — ćwiczenie systemu. Powiadomienia będą oznaczone jako TEST. SMS-y w trybie rzeczywistym są płatne.</p><label>Miejsce zdarzenia (opcjonalnie)<input v-model="location" maxlength="200" :disabled="sending" placeholder="np. Budynek A, sala 12" autofocus></label><label class="sms-checkbox launch-sms-checkbox"><input v-model="sendSms" type="checkbox" :disabled="sending || !data.smsGateway.enabled"><span><strong>Wyślij SMS-y do wszystkich</strong><small>Do nauczycieli Twojej szkoły z poprawnym numerem telefonu. Odznacz, aby uruchomić sam alert.</small></span></label><p class="form-hint">Alert pojawi się w panelach nauczycieli Twojej szkoły. {{ data.smsGateway.enabled ? (data.smsGateway.testMode ? 'Bramka SMS działa w trybie testowym, bez dostarczenia SMS-ów.' : 'Zaznaczona opcja SMS uruchomi płatną wysyłkę.') : 'Wysyłka SMS jest wyłączona. Administrator może włączyć ją w ustawieniach szkoły.' }}</p><p v-if="launchError" class="error" role="alert">{{ launchError }}</p><div class="modal-footer"><button type="button" class="btn secondary" :disabled="sending" @click="launchOpen = false">Anuluj</button><button class="btn danger" :disabled="sending || !connected || !selectedAlert">{{ sending ? 'Uruchamianie…' : 'Potwierdzam — uruchom ALERT' }}<Radio :size="17"/></button></div></form></section></div>
+    <div v-if="resolveTarget" class="modal-backdrop" @click.self="!sending && (resolveTarget = null)">
+      <section ref="launchDialog" class="modal teacher-resolve-modal" role="dialog" aria-modal="true" aria-labelledby="teacher-resolve-title">
+        <header><h2 id="teacher-resolve-title">Odwołaj alarm</h2><button class="icon-button" aria-label="Zamknij" :disabled="sending" @click="resolveTarget = null"><X :size="22"/></button></header>
+        <form @submit.prevent="resolveIncident">
+          <p class="modal-description">Czy odwołać alarm „{{ resolveTarget.name }}”? Zniknie z aktywnych alertów w szkole i pozostanie w historii.</p>
+          <label>Powód odwołania alarmu<textarea v-model="resolveReason" required maxlength="1000" rows="4" :disabled="sending" placeholder="Napisz, dlaczego odwołujesz alarm."></textarea></label>
+          <p class="form-hint">Powód jest obowiązkowy i zostanie zapisany w historii zdarzenia. Maksymalnie 1000 znaków.</p>
+          <p class="form-hint">Wysłane SMS-y i powiadomienia pozostają na telefonach odbiorców.</p>
+          <p v-if="!connected" class="error" role="alert">Brak połączenia. Odzyskaj połączenie, aby odwołać alarm.</p>
+          <p v-if="resolveError" class="error" role="alert">{{ resolveError }}</p>
+          <div class="modal-footer"><button type="button" class="btn secondary" :disabled="sending" @click="resolveTarget = null">Anuluj</button><button class="btn primary" :disabled="sending || !connected || !resolveReason.trim() || resolveReason.length > 1000">{{ sending ? 'Odwoływanie…' : 'Potwierdzam odwołanie' }}</button></div>
+        </form>
+      </section>
+    </div>
+    <div v-if="launchOpen" class="modal-backdrop" @click.self="!sending && (launchOpen = false)"><section ref="launchDialog" class="modal teacher-launch-modal" role="dialog" aria-modal="true" aria-labelledby="teacher-launch-title"><header><div><span class="eyebrow">POTWIERDZENIE ZDARZENIA</span><h2 id="teacher-launch-title">Uruchom alert w szkole</h2></div><button class="icon-button" aria-label="Zamknij" :disabled="sending" @click="launchOpen = false"><X :size="22"/></button></header><form @submit.prevent="launch"><label>Rodzaj alertu<select v-model="selectedAlert" required :disabled="sending"><option v-for="alert in availableAlerts" :key="alert.id" :value="alert.id">{{ alert.isTest ? '[TEST] ' + alert.name : alert.name }}</option></select></label><p v-if="availableAlerts.find(a => a.id === selectedAlert)?.isTest" class="test-alert-notice">ALERT TESTOWY — ćwiczenie systemu. Powiadomienia będą oznaczone jako TEST. SMS-y w trybie rzeczywistym są płatne.</p><label>Miejsce zdarzenia (opcjonalnie)<input v-model="location" maxlength="200" :disabled="sending" placeholder="np. Budynek A, sala 12" autofocus></label><label class="sms-checkbox launch-sms-checkbox"><input v-model="sendSms" type="checkbox" :disabled="sending || !data.smsGateway.configured"><span><strong>Wyślij SMS-y do wszystkich</strong><small>Do nauczycieli Twojej szkoły z poprawnym numerem telefonu. Możesz wybrać SMS także przy wyłączonej automatycznej wysyłce. Odznacz, aby uruchomić sam alert.</small></span></label><p class="form-hint">Alert pojawi się w panelach nauczycieli Twojej szkoły. {{ data.smsGateway.configured ? (data.smsGateway.testMode ? 'Bramka SMS działa w trybie testowym, bez dostarczenia SMS-ów.' : 'Zaznaczona opcja SMS uruchomi płatną wysyłkę.') : 'Brak klucza bramki SMS. Administrator musi zapisać go w ustawieniach szkoły.' }}</p><p v-if="launchError" class="error" role="alert">{{ launchError }}</p><div class="modal-footer"><button type="button" class="btn secondary" :disabled="sending" @click="launchOpen = false">Anuluj</button><button class="btn danger" :disabled="sending || !connected || !selectedAlert">{{ sending ? 'Uruchamianie…' : 'Potwierdzam — uruchom ALERT' }}<Radio :size="17"/></button></div></form></section></div>
   </div>
 </template>

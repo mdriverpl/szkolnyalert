@@ -9,6 +9,7 @@ import { createSmsGateway, smsSummary } from './smsapi.js';
 import { createTeacherPanel, teacherDeliveryStatus } from './teacher-panel.js';
 import { createTeacherLinkSms } from './teacher-link-sms.js';
 import { createPushGateway } from './push.js';
+import { createPasswordRecovery } from './password-recovery.js';
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const required = (value, label, max = 200) => {
@@ -55,6 +56,7 @@ export function createApp(store, options = {}) {
   const app = express(), attempts = new Map();
   const sms = createSmsGateway(store, options.sms);
   const push = createPushGateway(store, options.push);
+  const recovery = createPasswordRecovery(store, options.mail);
   const secure = process.env.NODE_ENV === 'production';
   const sessionCookie = { httpOnly: true, sameSite: 'strict', secure, maxAge: 8 * 60 * 60_000, path: '/' };
   const tokenHash = token => createHash('sha256').update(token).digest('hex');
@@ -112,10 +114,25 @@ export function createApp(store, options = {}) {
     rateLimit(req, 'login');
     const data = await store.read();
     const login = normalizeLogin(req.body.login || req.body.email);
-    const user = data.users.find(x => userLogins(x).includes(login));
+    let user = data.users.find(x => userLogins(x).includes(login));
     const valid = typeof req.body.password === 'string' && req.body.password.length <= 128 && await verifyPassword(req.body.password, user?.passwordHash || '00000000000000000000000000000000:' + '00'.repeat(64));
-    if (!user || !valid || (user.role !== 'superadmin' && !data.schools.some(x => x.id === user.schoolId))) throw fail('Niepoprawna nazwa użytkownika lub hasło.', 401);
-    await issueSession(req, res, user); res.json({ user: publicUser(user), demo: store.demo });
+    const reset = user?.passwordReset;
+    const temporary = !valid && typeof req.body.password === 'string' && req.body.password.length <= 128 && reset?.delivered && reset.expires > Date.now() && await verifyPassword(req.body.password, reset.passwordHash);
+    if (!user || (!valid && !temporary) || (user.role !== 'superadmin' && !data.schools.some(x => x.id === user.schoolId))) throw fail('Niepoprawna nazwa użytkownika lub hasło.', 401);
+    if (temporary) user = await store.mutate(data => {
+      const current = data.users.find(x => x.id === user.id && x.passwordHash === user.passwordHash && (x.authVersion || 0) === (user.authVersion || 0));
+      if (!current || current.passwordReset?.passwordHash !== reset.passwordHash || !current.passwordReset.delivered || current.passwordReset.expires <= Date.now()) throw fail('Hasło tymczasowe wygasło lub zostało już użyte. Odzyskaj hasło ponownie.', 401);
+      current.passwordHash = reset.passwordHash;
+      current.authVersion = (current.authVersion || 0) + 1;
+      delete current.passwordReset;
+      data.sessions = (data.sessions || []).filter(x => x.userId !== current.id);
+      return current;
+    });
+    await issueSession(req, res, user); res.json({ user: publicUser(user), demo: store.demo, temporaryPassword: !!temporary });
+  });
+  app.post('/api/password-recovery', async (req, res) => {
+    rateLimit(req, 'password-recovery', 5);
+    res.json(await recovery.request(req.body.email));
   });
   const teacherPanel = createTeacherPanel(store, { secure, rateLimit, launchIncident, vault: sms, push });
   app.use('/api/teacher-panel', teacherPanel.router);
@@ -147,6 +164,31 @@ export function createApp(store, options = {}) {
     await store.mutate(data => { data.sessions = (data.sessions || []).filter(x => x.tokenHash !== req.sessionHash); });
     res.clearCookie('session', { path: '/' }); res.json({ ok: true });
   });
+  app.post('/api/account/password', async (req, res) => {
+    rateLimit(req, 'password-change', 10);
+    const body = req.body;
+    const password = validatePassword(body.newPassword);
+    if (password !== body.confirmPassword) throw fail('Nowe hasła muszą być takie same.');
+    if (password === body.currentPassword) throw fail('Nowe hasło musi różnić się od obecnego.');
+    const user = (await store.read()).users.find(x => x.id === req.user.id);
+    if (typeof body.currentPassword !== 'string' || body.currentPassword.length > 128 || !await verifyPassword(body.currentPassword, user?.passwordHash)) throw fail('Obecne hasło jest nieprawidłowe.');
+    const newHash = await hashPassword(password);
+    const email = body.email === undefined ? user.email : body.email ? emailAddress(body.email) : '';
+    if (user.email && !email) throw fail('Podaj adres e-mail do odzyskiwania hasła.');
+    await store.mutate(data => {
+      const current = data.users.find(x => x.id === user.id && x.passwordHash === user.passwordHash && (x.authVersion || 0) === (user.authVersion || 0));
+      if (!current) throw fail('Dane konta zostały zmienione. Zaloguj się ponownie.', 409);
+      if (!current.username && current.email) current.username = current.email;
+      assertUniqueLogin(data.users, { ...current, email });
+      current.passwordHash = newHash; current.email = email;
+      current.authVersion = (current.authVersion || 0) + 1;
+      delete current.passwordReset;
+      data.sessions = (data.sessions || []).filter(x => x.userId !== current.id || x.tokenHash === req.sessionHash);
+      const session = data.sessions.find(x => x.tokenHash === req.sessionHash);
+      if (session) session.authVersion = current.authVersion;
+    });
+    res.json({ ok: true });
+  });
   app.get('/api/state', async (req, res) => {
     const data = await store.read();
     const result = { schools: data.schools.filter(x => x.id === req.schoolId) };
@@ -155,7 +197,7 @@ export function createApp(store, options = {}) {
     result.users = ['admin', 'superadmin'].includes(req.user.role) ? data.users.filter(x => x.schoolId === req.schoolId && x.role !== 'superadmin').map(publicUser) : [];
     if (req.user.role === 'superadmin') { result.availableSchools = data.schools; result.selectedSchoolId = req.schoolId; }
     const gateway = smsSummary(data.smsSettings?.find(x => x.schoolId === req.schoolId));
-    res.json({ ...result, user: req.user, demo: store.demo, loginRequired: true, smsGateway: { provider: gateway.provider, enabled: gateway.enabled && gateway.hasToken, testMode: gateway.testMode } });
+    res.json({ ...result, user: req.user, demo: store.demo, loginRequired: true, smsGateway: { provider: gateway.provider, configured: gateway.hasToken, enabled: gateway.enabled && gateway.hasToken, testMode: gateway.testMode } });
   });
   app.get('/api/settings/sms', adminOnly, async (req, res) => res.json(await sms.getSettings(req.schoolId)));
   app.put('/api/settings/sms', adminOnly, async (req, res) => res.json(await sms.saveSettings(req.schoolId, req.body)));
@@ -227,6 +269,7 @@ export function createApp(store, options = {}) {
             if (existing?.role === 'admin' && body.role !== 'admin' && !data.users.some(x => x.schoolId === req.schoolId && x.id !== existing.id && x.role === 'admin')) throw fail('W szkole musi pozostać co najmniej jeden administrator.');
             record.role = body.role; record.passwordHash = passwordHash || existing.passwordHash;
             record.authVersion = (existing?.authVersion || 0) + (existing && (passwordHash || existing.role !== record.role || existing.email !== record.email || normalizeLogin(existing.username || existing.email) !== record.username) ? 1 : 0);
+            if (existing?.passwordReset && record.authVersion === (existing.authVersion || 0)) record.passwordReset = existing.passwordReset;
           } else if (collection === 'teachers') {
             Object.assign(record, teacherData({ ...body, phone: body.phone ?? existing?.phone }));
             if (data.teachers.some(x => x.id !== record.id && x.schoolId === req.schoolId && x.email === record.email)) throw fail('Nauczyciel z tym adresem już istnieje w szkole.');
@@ -275,9 +318,10 @@ export function createApp(store, options = {}) {
       const procedure = ownRecord(data, 'procedures', alert.procedureId, schoolId);
       const incident = { id: id(), alertId: alert.id, schoolId, name: alert.name, severity: alert.severity, location: (body.location === undefined || (typeof body.location === 'string' && body.location.length <= 200 && !body.location.trim())) ? 'Nie podano miejsca' : required(body.location, 'miejsce zdarzenia'), procedure: structuredClone(procedure), status: 'active', createdAt: new Date().toISOString(), createdBy: actor.username, ...(actor.teacherId ? { createdByTeacherId: actor.teacherId } : {}) };
       const gateway = data.smsSettings?.find(x => x.schoolId === schoolId);
+      if (body.sendSms === true && !gateway?.encryptedToken) throw fail('Najpierw zapisz klucz bramki SMS w Ustawieniach szkoły.');
       incident.isTest = alert.isTest === true;
       if (incident.isTest) incident.name = `[TEST] ${incident.name}`;
-      incident.sms = { status: body.sendSms !== false && gateway?.enabled && gateway.encryptedToken ? 'pending' : 'disabled', ...(body.sendSms === false ? { message: 'Uruchomiono alert bez wysyłki SMS.' } : {}) };
+      incident.sms = { status: gateway?.encryptedToken && (body.sendSms === true || (body.sendSms !== false && gateway.enabled)) ? 'pending' : 'disabled', ...(body.sendSms === true ? { requested: true } : {}), ...(body.sendSms === false ? { message: 'Uruchomiono alert bez wysyłki SMS.' } : {}) };
       data.incidents.unshift(incident); return incident;
     });
     const notification = Promise.all([sms.notifyIncident(schoolId, result.id), push.notifyIncident(schoolId, result.id)]);

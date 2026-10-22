@@ -22,6 +22,46 @@ async function fixture(t) {
 }
 const login = (request, login = 'admin@szkolnyalert.pl') => request('/login', 'POST', { login, password: 'demo12345' });
 
+test('only the teacher who launched an incident can resolve it through the personal panel', async t => {
+  const { store, client } = await fixture(t);
+  const admin = client(), otherAdmin = client(), author = client(), colleague = client(), foreign = client();
+  await login(admin); await login(otherAdmin, 'admin2@szkolnyalert.pl');
+  for (const [request, teacherId, manager] of [[author, 'teacher-1', admin], [colleague, 'teacher-2', admin], [foreign, 'teacher-9', otherAdmin]]) {
+    const key = await manager(`/teachers/${teacherId}/panel-key`, 'POST');
+    assert.equal(key.status, 200);
+    assert.equal((await request('/teacher-panel/access', 'POST', { key: key.body.key })).status, 200);
+  }
+  const event = await author('/teacher-panel/incidents', 'POST', { alertId: 'alert-2', sendSms: false });
+  assert.equal(event.status, 201);
+  const path = `/teacher-panel/incidents/${event.body.id}/resolve`;
+  assert.equal((await client()(path, 'POST')).status, 401);
+  assert.equal((await colleague(path, 'POST', { teacherId: 'teacher-1' })).status, 403);
+  assert.equal((await foreign(path, 'POST')).status, 404);
+  assert.equal((await author('/teacher-panel/incidents/incident-demo-1/resolve', 'POST')).status, 403);
+  assert.equal((await author('/teacher-panel/incidents/missing/resolve', 'POST')).status, 404);
+  for (const reason of [undefined, null, '', ' \n\t ', 123, {}, 'a'.repeat(1001)]) {
+    const rejected = await author(path, 'POST', reason === undefined ? undefined : { reason });
+    assert.equal(rejected.status, 400);
+    assert.match(rejected.body.error, /powód/);
+    assert.equal((await store.read()).incidents.find(x => x.id === event.body.id).status, 'active');
+  }
+  const reason = 'Fałszywy alarm.\nSprawdzono salę, brak zagrożenia.';
+  const resolved = await author(path, 'POST', { reason: `  ${reason}  ` });
+  assert.equal(resolved.status, 200);
+  assert.equal(resolved.body.status, 'resolved');
+  assert.equal(resolved.body.resolvedByTeacherId, 'teacher-1');
+  assert.equal(resolved.body.resolvedBy, 'Anna Kowalska');
+  assert.ok(resolved.body.resolvedAt);
+  assert.equal(resolved.body.resolutionReason, reason);
+  assert.equal((await admin('/state')).body.incidents.find(x => x.id === event.body.id).resolutionReason, reason);
+  assert.equal((await author(path, 'POST')).status, 400);
+  assert.equal((await colleague('/teacher-panel/state')).body.incidents.some(x => x.id === event.body.id), false);
+  assert.equal((await store.read()).incidents.find(x => x.id === event.body.id).status, 'resolved');
+  const relaunched = await author('/teacher-panel/incidents', 'POST', { alertId: 'alert-2', sendSms: false });
+  assert.equal(relaunched.status, 201);
+  assert.equal((await admin(`/incidents/${relaunched.body.id}/resolve`, 'POST')).status, 200);
+});
+
 test('creation and CSV import issue recoverable encrypted personal keys atomically without rotating on edits or duplicates', async t => {
   const { store, client, restart } = await fixture(t);
   const admin = client(), other = client(), teacher = client(), panel = client();

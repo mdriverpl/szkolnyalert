@@ -119,8 +119,9 @@ export function createSmsGateway(store, { encryptionKey, fetchImpl = (...args) =
     const job = await store.mutate(data => {
       const incident = data.incidents.find(x => x.id === incidentId && x.schoolId === schoolId);
       if (!incident || incident.sms?.status !== 'pending') return null;
+      if (incident.status !== 'active') { incident.sms = { status: 'disabled', message: 'Zdarzenie zakończono przed rozpoczęciem wysyłki SMS.' }; return null; }
       const settings = data.smsSettings?.find(x => x.schoolId === schoolId);
-      if (!settings?.enabled || !settings.encryptedToken) { incident.sms = { status: 'disabled' }; return null; }
+      if (!settings?.encryptedToken || (!settings.enabled && incident.sms.requested !== true)) { incident.sms = { status: 'disabled' }; return null; }
       const recipients = smsRecipients(data, schoolId);
       if (!recipients.numbers.length) { incident.sms = { status: 'no_recipients', message: 'Brak poprawnych numerów nauczycieli.' }; return null; }
       if (recipients.numbers.length > 10000) { incident.sms = { status: 'failed', message: 'Przekroczono limit 10 000 odbiorców.' }; return null; }

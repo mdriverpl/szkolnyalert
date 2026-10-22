@@ -20,6 +20,11 @@ services:
       SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-biuro@mdriver.pl}
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-}
       HOSTAVA_SMS_KEY: ${HOSTAVA_SMS_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
       JSON_BACKUP_INTERVAL_MINUTES: ${JSON_BACKUP_INTERVAL_MINUTES:-60}
       JSON_BACKUP_LIMIT: ${JSON_BACKUP_LIMIT:-48}
       # Host Nginx connects through Docker's private bridge. Host port stays on loopback.

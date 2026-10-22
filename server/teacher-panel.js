@@ -82,11 +82,28 @@ export function createTeacherPanel(store, { secure, rateLimit, launchIncident, v
     const school = data.schools.find(x => x.id === schoolId);
     const alerts = data.alerts.filter(x => x.schoolId === schoolId).map(alert => ({ ...alert, procedure: data.procedures.find(p => p.id === alert.procedureId && p.schoolId === schoolId) })).filter(x => x.procedure);
     const gateway = data.smsSettings?.find(x => x.schoolId === schoolId);
-    res.json({ teacher: { id: teacher.id, name: teacher.name, subject: teacher.subject }, school: { id: school.id, name: school.name }, alerts, incidents: data.incidents.filter(x => x.schoolId === schoolId && x.status === 'active'), smsGateway: { enabled: !!gateway?.enabled && !!gateway.encryptedToken, testMode: gateway?.testMode !== false }, checkedAt: new Date().toISOString() });
+    res.json({ teacher: { id: teacher.id, name: teacher.name, subject: teacher.subject }, school: { id: school.id, name: school.name }, alerts, incidents: data.incidents.filter(x => x.schoolId === schoolId && x.status === 'active'), smsGateway: { configured: !!gateway?.encryptedToken, enabled: !!gateway?.enabled && !!gateway.encryptedToken, testMode: gateway?.testMode !== false }, checkedAt: new Date().toISOString() });
   });
   router.post('/incidents', async (req, res) => {
     const incident = await launchIncident(req.panelSchoolId, { username: req.panelTeacher.name, teacherId: req.panelTeacher.id }, req.body, false);
     res.status(201).json(incident);
+  });
+  router.post('/incidents/:id/resolve', async (req, res) => {
+    const result = await store.mutate(data => {
+      const incident = data.incidents.find(x => x.id === req.params.id && x.schoolId === req.panelSchoolId);
+      if (!incident) throw fail('Nie znaleziono zdarzenia.', 404);
+      if (incident.createdByTeacherId !== req.panelTeacher.id) throw fail('Możesz odwołać tylko alarm uruchomiony przez siebie.', 403);
+      if (incident.status !== 'active') throw fail('Zdarzenie zostało już zakończone.');
+      const reason = req.body?.reason;
+      if (typeof reason !== 'string' || !reason.trim() || reason.length > 1000) throw fail('Podaj powód odwołania alarmu (maks. 1000 znaków).');
+      incident.status = 'resolved';
+      incident.resolutionReason = reason.trim();
+      incident.resolvedAt = new Date().toISOString();
+      incident.resolvedBy = req.panelTeacher.name;
+      incident.resolvedByTeacherId = req.panelTeacher.id;
+      return incident;
+    });
+    res.json(result);
   });
   router.get('/push', (req, res) => res.json(push.config()));
   router.post('/push', async (req, res) => {

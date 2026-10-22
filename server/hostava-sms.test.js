@@ -96,7 +96,7 @@ test('Hostava alerts deduplicate school recipients and personal links use the sa
       { schoolId: 'school-demo', phone: '+48 500 600 700' },
       { schoolId: 'school-demo-2', phone: '500600799' }
     ];
-    data.incidents.push({ id: 'hostava-incident', schoolId: 'school-demo', name: 'Alert', location: 'Sala 1', procedure: { name: 'Procedura' }, sms: { status: 'pending' } });
+    data.incidents.push({ id: 'hostava-incident', schoolId: 'school-demo', status: 'active', name: 'Alert', location: 'Sala 1', procedure: { name: 'Procedura' }, sms: { status: 'pending' } });
   });
   await gateway.notifyIncident('school-demo', 'hostava-incident');
   await gateway.notifyIncident('school-demo', 'hostava-incident');

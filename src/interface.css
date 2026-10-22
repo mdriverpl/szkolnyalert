@@ -283,3 +283,10 @@ footer { color: #929eb0; }
 .global-help-link:hover{background:var(--brand-navy-end)}
 .global-help-link:focus-visible{outline:3px solid var(--brand-coral-strong);outline-offset:4px}
 @media print{.global-help-link{display:none}}
+.account-password-button { display: flex; align-items: center; gap: 9px; width: 100%; margin-top: 20px; padding: 10px 0; color: var(--brand-coral); font-size: 12px; text-align: left; }
+.account-password-button:focus-visible { outline-color: var(--brand-coral); }
+.recovery-message { border: 1px solid var(--brand-border); border-radius: 8px; padding: 14px; color: var(--brand-navy); background: #f0f3f8; font-size: 13px; line-height: 1.7; }
+.password-recovery-form + .form-hint { margin-top: 16px; }
+.teacher-notifications-enabled > td { background: var(--notifications-enabled-bg); }
+.event-resolution-reason { margin-top: 12px; padding: 12px; border-left: 3px solid var(--brand-coral); color: var(--brand-navy); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.event-resolution-reason p { margin-top: 4px; white-space: pre-wrap; }

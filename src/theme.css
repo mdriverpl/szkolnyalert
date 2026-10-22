@@ -8,5 +8,6 @@
   --brand-muted: #a8b8cf;
   --brand-border: #35445e;
   --brand-surface: #1d2d46;
+  --notifications-enabled-bg: #eaf7e8;
   --brand-gradient: radial-gradient(ellipse at 100% 100%, var(--brand-navy-end) 0, var(--brand-navy) 65%);
 }

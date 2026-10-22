@@ -54,7 +54,7 @@ Próba wysyłki jest oznaczana w danych przed wywołaniem SMSAPI. Nie ma automat
 
 ### Dodanie nowej szkoły
 
-Na ekranie startowym kliknij **Dodaj szkołę**, bez wcześniejszego logowania. Formularz ma trzy pola: **nazwa szkoły**, **nazwa użytkownika** i **hasło** (11–128 znaków). Nazwa użytkownika ma 3–80 znaków, bez spacji, i jest unikalna bez względu na wielkość liter. To login pierwszego administratora tej szkoły. Po zapisaniu otworzy się panel wyłącznie nowej placówki. Miejscowość, adres i dane kontaktowe można uzupełnić później. Rejestracja nigdy nie nadaje dostępu do istniejącej szkoły.
+Na ekranie startowym kliknij **Dodaj szkołę**, bez wcześniejszego logowania. Formularz wymaga **nazwy szkoły**, **nazwy użytkownika** i **hasła** (11–128 znaków). Możesz również podać **e-mail do odzyskiwania hasła**. Nazwa użytkownika ma 3–80 znaków, bez spacji, i jest unikalna bez względu na wielkość liter. To login pierwszego administratora tej szkoły. Po zapisaniu otworzy się panel wyłącznie nowej placówki. Miejscowość, adres i dane kontaktowe można uzupełnić później. Rejestracja nigdy nie nadaje dostępu do istniejącej szkoły.
 
 ### Konta demonstracyjne
 
@@ -67,6 +67,14 @@ Na ekranie startowym kliknij **Dodaj szkołę**, bez wcześniejszego logowania. 
 Hasło wszystkich kont demo: `demo12345`. Skrócone hasło dotyczy tylko przygotowanych kont przykładowych; nowe konta wymagają minimum 11 znaków. Konta demo nie są wyświetlane na ekranie logowania; aby z nich skorzystać, wpisz e-mail i hasło w formularzu.
 
 Hasła są przechowywane jako skróty scrypt z losową solą. API nigdy nie zwraca skrótów haseł. Sesja HTTP-only / SameSite=Strict trwa 8 godzin i przeżywa restart backendu. Sesje są zapisywane w tym samym magazynie co dane aplikacji (plik demo albo PostgreSQL); przechowywany jest skrót SHA-256 tokenu, nie sam token cookie. Wylogowanie usuwa sesję trwale. Usunięcie konta lub zmiana hasła, nazwy użytkownika, e-maila albo roli unieważnia jego sesje.
+
+## Odzyskiwanie i zmiana hasła
+
+Na obu ekranach logowania wybierz **Nie pamiętasz hasła? Odzyskaj hasło** i wpisz e-mail zapisany na koncie użytkownika. Aplikacja wysyła losowe hasło tymczasowe, ważne przez 30 minut. Dotychczasowe hasło i sesje pozostają aktywne do pierwszego użycia hasła tymczasowego. Jego użycie zastępuje hasło i wylogowuje wcześniejsze sesje. Po zalogowaniu otwiera się formularz ustawienia własnego hasła. Odpowiedź odzyskiwania jest taka sama dla istniejących i nieistniejących kont; hasła nie trafiają do odpowiedzi API ani logów. Zapis zawiera wyłącznie skrót scrypt. Wysyłka jest ograniczona do jednej wiadomości na konto na minutę i pięciu prób z jednego IP w ciągu 15 minut.
+
+Zalogowany użytkownik każdej roli wybiera **Zmień hasło** w dolnej części bocznego menu. Podaje obecne hasło, nowe hasło i powtórzenie. Może też uzupełnić e-mail do odzyskiwania. Aktualna sesja pozostaje aktywna, pozostałe zostają unieważnione, podobnie jak wcześniejsze hasła tymczasowe. Dane konta z hasłem są niezależne od osobistego linku nauczyciela.
+
+Skonfiguruj w prywatnym `.env`: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` i `SMTP_FROM`. Port 465 używa TLS, pozostałe wymagają STARTTLS. Dla poczty Hostava użyj `SMTP_HOST=poczta.hostava.pl` i `SMTP_PORT=465`, a jako użytkownika pełnego adresu skrzynki. Przykłady `.env` zawierają puste pola; nie umieszczaj prawdziwych danych poczty w repozytorium. Compose przekazuje te zmienne do aplikacji. Po zmianie konfiguracji zrestartuj serwer. Brak konfiguracji wyświetla komunikat o niedostępności odzyskiwania. Błąd SMTP nie zmienia aktualnego hasła ani sesji. Konto bez e-maila wymaga pomocy administratora szkoły lub wcześniejszego uzupełnienia adresu.
 
 ## PostgreSQL
 
@@ -96,6 +104,8 @@ Remove-Item Env:SCHOOL_ADMIN_PASSWORD
 ```
 
 Wyłącz serwer przed użyciem tego narzędzia z plikiem demo, potem uruchom ponownie. Narzędzie dodaje konto tylko do wskazanej istniejącej szkoły i nie zmienia danych innych szkół. Dla PostgreSQL korzysta z tego samego `.env` co aplikacja.
+
+Ręczne zaznaczenie **Wyślij SMS-y do wszystkich** przy uruchamianiu alertu działa po zapisaniu klucza bramki, także gdy automatyczne SMS-y są wyłączone. Przełącznik automatycznych SMS-ów określa domyślne zaznaczenie tej opcji. Brak klucza blokuje wybór SMS z wyjaśnieniem; sam alert można uruchomić bez SMS. Tryb testowy bramki nadal nie dostarcza wiadomości.
 
 ## Alerty testowe
 
@@ -141,7 +151,7 @@ W katalogu **Nauczyciele** administrator może kliknąć ikonę wiadomości przy
 2. Link i klucz powstają automatycznie przy dodaniu nauczyciela i zapisie importu CSV. Administrator kopiuje gotowy link i przekazuje go właściwemu nauczycielowi. Edycja danych, podgląd CSV i pominięte duplikaty nie zmieniają kluczy. Starsze wpisy, które nie mają zapisanego linku, nadal pozwalają wygenerować go ręcznie. Link jest generowany z adresu, pod którym administrator otworzył aplikację — do udostępniania poza komputerem użyj publicznego adresu HTTPS.
 3. Nauczyciel otwiera link `/nauczyciel#klucz=…` lub wpisuje klucz na stronie `/nauczyciel`. Po poprawnym otwarciu linku lub wpisaniu klucza panel zapamiętuje klucz w localStorage tej przeglądarki i automatycznie odtwarza sesję. Przycisk Zamknij nie wylogowuje i nie usuwa zapisanego klucza; unieważnienie przez administratora blokuje dostęp i usuwa klucz przy następnym sprawdzeniu. Klucz znika z adresu po zalogowaniu. Przycisk „Zainstaluj aplikację” znajduje się na górze panelu, przed danymi nauczyciela. Nauczyciel nie otrzymuje dostępu do panelu administracyjnego ani listy kontaktów.
 4. Panel pokazuje imię i nazwisko, szkołę, duży przycisk **URUCHOM ALERT** oraz aktywne zdarzenia. Każde aktywne zdarzenie ma od razu widoczną pełną procedurę bezpieczeństwa. Uruchomienie wymaga wyboru alertu. Miejsce zdarzenia jest opcjonalne; bez niego historia i SMS pokazują „Nie podano miejsca”.
-5. W otwartym panelu dane odświeżają się co 3 sekundy oraz po powrocie do aplikacji. Po uruchomieniu własnego alertu procedura pojawia się od razu; wysyłka SMS jest obsługiwana niezależnie i nie opóźnia odpowiedzi panelu nauczyciela. Alarm kończy administrator.
+5. W otwartym panelu dane odświeżają się co 3 sekundy oraz po powrocie do aplikacji. Po uruchomieniu własnego alertu procedura pojawia się od razu; wysyłka SMS jest obsługiwana niezależnie i nie opóźnia odpowiedzi panelu nauczyciela. Alarm może odwołać jego autor przyciskiem **Odwołaj alarm** po wpisaniu obowiązkowego powodu i potwierdzeniu. Powód (maksymalnie 1000 znaków) jest widoczny w historii zdarzenia. Administrator nadal może zakończyć każde zdarzenie. Zapis pozostaje w historii z datą i autorem zakończenia. Wysłane SMS-y i powiadomienia pozostają na telefonach odbiorców.
 
 Każdy nauczyciel ma własny losowy klucz 256-bitowy. Serwer przechowuje skrót SHA-256 do weryfikacji oraz zaszyfrowaną kopię AES-GCM do ponownego kopiowania przez administratora własnej szkoły. Kopia używa klucza `SMS_ENCRYPTION_KEY` z osobnym kontekstem szyfrowania dla panelu nauczyciela i szkoły. W produkcji klucz serwera jest wymagany także przy dodawaniu i imporcie nauczycieli, niezależnie od konfiguracji SMSAPI. Klucz nauczyciela jest odczytywany wyłącznie przez osobny endpoint administratora, znajduje się we fragmencie URL (nie w ścieżce ani query string) i po wymianie na sesję jest usuwany z paska adresu. Sesja nauczyciela ma oddzielne cookie HTTP-only/SameSite i trwa 30 dni; przeżywa restart backendu. Nie zastępuje sesji administratora, więc podgląd panelu nie wylogowuje administratora. Wygenerowanie nowego klucza, unieważnienie linku lub usunięcie nauczyciela natychmiast odcina poprzedni dostęp i sesje. Uprawnienia są zawsze ograniczone do szkoły przypisanej nauczycielowi.
 

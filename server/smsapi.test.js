@@ -102,7 +102,7 @@ test('partial acceptance and missing recipients are reported accurately', async 
   assert.equal(noRecipients.body.sms.status, 'no_recipients'); assert.equal(calls.length, 1);
 });
 
-test('each alert can skip SMS, request it, or follow school defaults without bypassing disabled sending', async t => {
+test('each alert can skip SMS, request it explicitly with a saved key, or follow automatic defaults', async t => {
   const { client, calls } = await fixture(t); const admin = client(); await login(admin);
   await admin('/settings/sms', 'PUT', { ...settings, testMode: false });
   for (const sendSms of ['false', 1, null]) {
@@ -116,10 +116,36 @@ test('each alert can skip SMS, request it, or follow school defaults without byp
   assert.equal(sent.status, 201); assert.equal(sent.body.sms.accepted, 1);
   assert.equal(new URLSearchParams(calls[0].options.body).get('to'), '48500600700');
   await admin(`/incidents/${sent.body.id}/resolve`, 'POST');
-  await admin('/settings/sms', 'PUT', { ...settings, token: '', enabled: false });
-  const disabled = await admin('/incidents', 'POST', { alertId: 'alert-2', sendSms: true });
+  await admin('/settings/sms', 'PUT', { ...settings, token: '', enabled: false, testMode: false });
+  const disabled = await admin('/incidents', 'POST', { alertId: 'alert-2' });
   assert.equal(disabled.status, 201); assert.equal(disabled.body.sms.status, 'disabled');
   assert.equal(calls.length, 1);
+  assert.equal((await admin('/state')).body.smsGateway.configured, true);
+  assert.equal((await admin('/state')).body.smsGateway.enabled, false);
+  await admin(`/incidents/${disabled.body.id}/resolve`, 'POST');
+  const manual = await admin('/incidents', 'POST', { alertId: 'alert-2', sendSms: true });
+  assert.equal(manual.status, 201); assert.equal(manual.body.sms.status, 'accepted');
+  assert.equal(calls.length, 2);
+  await admin(`/incidents/${manual.body.id}/resolve`, 'POST');
+  await admin('/settings/sms', 'DELETE');
+  const missingKey = await admin('/incidents', 'POST', { alertId: 'alert-2', sendSms: true });
+  assert.equal(missingKey.status, 400);
+  assert.match(missingKey.body.error, /klucz/);
+  assert.equal(calls.length, 2);
+  const withoutSms = await admin('/incidents', 'POST', { alertId: 'alert-2', sendSms: false });
+  assert.equal(withoutSms.status, 201, 'failed SMS validation must not create an incident');
+});
+
+test('an incident resolved before its queued SMS starts sends no messages', async t => {
+  const { store, client, calls, sms } = await fixture(t);
+  const admin = client(); await login(admin);
+  await admin('/settings/sms', 'PUT', { ...settings, testMode: false });
+  await store.mutate(data => {
+    data.incidents.push({ id: 'resolved-before-send', schoolId: 'school-demo', status: 'resolved', sms: { status: 'pending', requested: true } });
+  });
+  await createSmsGateway(store, sms).notifyIncident('school-demo', 'resolved-before-send');
+  assert.equal(calls.length, 0);
+  assert.equal((await store.read()).incidents.find(x => x.id === 'resolved-before-send').sms.status, 'disabled');
 });
 
 test('test alerts retain their marker in history and label actual SMS messages as an exercise', async t => {
